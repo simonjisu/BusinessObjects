@@ -1,0 +1,6 @@
+{
+    "python.defaultInterpreterPath": "/home/simonjisu/code/BusinessLake/.venv/bin/python",
+    "python.analysis.extraPaths": [
+        "/home/simonjisu/code/BusinessLake"
+    ]
+}
