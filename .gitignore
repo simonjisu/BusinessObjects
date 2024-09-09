@@ -163,3 +163,4 @@ cython_debug/
 data/bird
 data/sparc
 data/tpch/tpch.db
+data/tpch/tables

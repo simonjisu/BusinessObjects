@@ -61,6 +61,9 @@ def get_schema_str(
         col_explanation: Optional[dict[str, dict[str, str]]]=None,   # table_name: {col_name: col_desc}
         col_fmt: str="'"
     ) -> str:
+    """
+    col_explanation: overrides the column explanation in the schema
+    """
     def format_column(col_name: str, col_type: str, col_fmt: str="'", col_desc: Optional[str]=None) -> str:
         if col_desc is not None:
             return f'{col_fmt}{col_name}{col_fmt}({col_type}): {col_desc}'
@@ -81,6 +84,7 @@ def get_schema_str(
         ])
 
     schema_str = ''
+    schema_str += '[Table and Columns]\n'
     for table_name, cols in schema.items():
         if col_explanation is not None:
             schema_str += f'Table Name: {table_name}\n'
@@ -90,9 +94,9 @@ def get_schema_str(
             schema_str += f'{table_name}: {format_list_of_columns(cols, col_fmt)}\n'
     schema_str = schema_str.strip()
     if foreign_keys is not None:
-        schema_str += '\n\n## Foreign Keys\n'
+        schema_str += '\n\n[Foreign Keys]\n'
         schema_str += '\n'.join(foreign_keys)
     if primary_keys is not None:
-        schema_str += '\n\n## Primary Keys\n'
+        schema_str += '\n\n[Primary Keys]\n'
         schema_str += '\n'.join(primary_keys)
     return schema_str

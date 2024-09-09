@@ -2,10 +2,14 @@ import duckdb
 from pathlib import Path
 from typing import Optional
 import re
+from duckdb import ConversionException
+import sqlite3
+import pandas as pd
 
 class Database:
     def __init__(self, db_file: str|Path):
         self.db_file = str(db_file)
+        self.dbtype = db_file.split('.')[-1]
         self.column_types = {
             'Null': ['NULL'],
             'Boolean': ['BOOLEAN'],
@@ -14,9 +18,54 @@ class Database:
             'Text': ['VARCHAR', 'CHAR', 'BPCHAR', 'TEXT', 'STRING'],
             'Time': ['DATE', 'DATETIME', 'TIMESTAMP', 'INTERVAL', 'TIMESTAMP WITH TIME ZONE', 'TIMESTAMPZ'],
         }
-        if db_file.split('.')[-1] not in ['sqlite']:
-            self.table_cols = self._get_table_columns()
-            self.foreign_keys = self._get_foreign_keys()
+        
+    def start(self):
+        raise NotImplementedError
+
+    def close(self):
+        raise NotImplementedError
+
+    def execute(self, query: str, rt_pandas: bool = True):
+        raise NotImplementedError
+    
+
+class SqliteDatabase(Database):
+    def __init__(self, db_file: str|Path, schema: dict[str, dict[str, str]]):
+        super().__init__(db_file)
+        self.dbtype = 'sqlite'
+        self.schema = schema
+
+        # TODO
+        # table columns
+
+    def start(self):
+        self.con = sqlite3.connect(self.db_file)
+
+    def close(self):
+        self.con.close()
+
+    def execute(self, query: str, rt_pandas: bool = True):
+        self.start()
+        
+        if rt_pandas:
+            output = pd.read_sql_query(query, self.con)
+        
+        else:
+            c = self.con.cursor()
+            output = c.execute(query).fetchall()
+            c.close()
+        c.close()
+        self.close()
+
+        return output
+
+class DuckDBDatabase(Database):
+    def __init__(self, db_file: str|Path):
+        super().__init__(db_file)
+        self.dbtype = 'duckdb'
+
+        self.table_cols = self._get_table_columns()
+        self.foreign_keys = self._get_foreign_keys()
 
     def _get_table_columns(self):
         query = 'SHOW ALL TABLES;'
@@ -56,10 +105,11 @@ class Database:
                 table_name, categorical_threshold, skip_keys)
         return table_summary
 
-    def _summarize_table(self, 
-                         table_name: str, 
-                         categorical_threshold: Optional[float]=0.05, 
-                         skip_keys: Optional[list[str]]=[]
+    def _summarize_table(
+            self, 
+            table_name: str, 
+            categorical_threshold: Optional[float]=0.05, 
+            skip_keys: Optional[list[str]]=[],
         ):
         query = f'SUMMARIZE {table_name};'
         df = self.execute(query)
@@ -72,6 +122,7 @@ class Database:
         )
         df = df.loc[:, ['column_name', 'column_type', 'logical_type', 'approx_unique', 
                         'count', 'null_percentage', 'min', 'max',  'avg', 'std', 'q25', 'q50', 'q75']]
+
         return df
 
     def _check_logical_type(self, x, 
