@@ -30,13 +30,27 @@ class Database:
     
 
 class SqliteDatabase(Database):
-    def __init__(self, db_file: str|Path, schema: dict[str, dict[str, str]]):
+    def __init__(self, db_file: str|Path, foreign_keys: Optional[dict[str, str]|list[str]]=None):
         super().__init__(db_file)
         self.dbtype = 'sqlite'
-        self.schema = schema
-
-        # TODO
-        # table columns
+        self.table_cols = self._get_table_columns()
+        if isinstance(foreign_keys, list):
+            # the format is list of ['table_name.col_name = table_name.col_name']
+            assert all(['=' in fk for fk in foreign_keys]), 'if `foreign_keys` is a list, must be in the format of "table_name.col_name = table_name.col_name"'
+            self.foreign_keys = [{'fkey': fk.split('=')[0].strip(), 'pkey': fk.split('=')[1].strip()} for fk in foreign_keys]
+        else:
+            # {'fkey': 'table_name.col_name', 'pkey': 'table_name.col_name'}
+            self.foreign_keys = foreign_keys   
+    
+    def _get_table_columns(self):
+        query = 'SELECT name FROM sqlite_master WHERE type="table";'
+        tables = self.execute(query)['name'].values.tolist()
+        table_cols = {}
+        for table in tables:
+            query = f'PRAGMA table_info({table});'
+            df = self.execute(query)
+            table_cols[table] = df['name'].values.flatten().tolist()
+        return table_cols
 
     def start(self):
         self.con = sqlite3.connect(self.db_file)
@@ -54,9 +68,8 @@ class SqliteDatabase(Database):
             c = self.con.cursor()
             output = c.execute(query).fetchall()
             c.close()
-        c.close()
-        self.close()
 
+        self.close()
         return output
 
 class DuckDBDatabase(Database):
@@ -70,8 +83,8 @@ class DuckDBDatabase(Database):
     def _get_table_columns(self):
         query = 'SHOW ALL TABLES;'
         df = self.execute(query)
-        table_names = df['name'].str.lower().values.flatten().tolist()
-        column_names = df['column_names'].apply(lambda x: list(map(str.lower, x))).values.flatten().tolist()
+        table_names = df['name'].values.flatten().tolist()
+        column_names = df['column_names'].values.flatten().tolist()
         return dict(zip(table_names, column_names))
 
     def _get_foreign_keys(self):
@@ -85,11 +98,7 @@ class DuckDBDatabase(Database):
         ptbls, pcols = list(zip(*df_keys['unique_constraint_name'].apply(lambda x: x.rstrip('_pkey').split('_', 1)).values.tolist()))
 
         foregin_keys = []
-        for ft, fc, pt, pc in zip(ftbls, fcols, ptbls, pcols):
-            ft = ft.lower()
-            pt = pt.lower()
-            fc = fc.lower()
-            pc = pc.lower()
+        for ft, fc, pt, pc in zip(ftbls, fcols, ptbls, pcols):  # parent key
             foregin_keys.append({'fkey': f'{ft}.{fc}', 'pkey': f'{pt}.{pc}'})
 
         return foregin_keys
