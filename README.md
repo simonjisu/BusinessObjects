@@ -27,3 +27,21 @@ follow the instruction in GCP Migration from PostgreSQL to BigQuery: [link](http
 
 
 * install gcloud sdk: [link](https://cloud.google.com/sdk/docs/install?hl=ko#linux)
+
+
+```
+"duckdb>=1.0.0",
+    "ipykernel>=6.29.5",
+    "ipywidgets>=8.1.5",
+    "langchain-openai>=0.1.23",
+    "litellm>=1.44.22",
+    "matplotlib>=3.9.2",
+    "numpy>=2.1.1",
+    "tqdm>=4.66.5",
+    "python-dotenv>=1.0.1",
+    "pandas>=2.2.2",
+    "torch>=2.4.1",
+    "transformers>=4.44.2",
+    "sqlglot[rs]>=25.20.1",
+
+```

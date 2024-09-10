@@ -3,13 +3,13 @@ from tqdm import tqdm
 from .db_utils import get_schema_str, get_data_dict
 from dotenv import load_dotenv, find_dotenv
 from pathlib import Path
-from langchain_core.pydantic_v1 import BaseModel as LCBaseModel, Field
+from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
 from collections import defaultdict
-from pydantic import BaseModel
+# from pydantic import BaseModel
 
 class DatabaseModel(BaseModel):
     db_id: str
@@ -92,7 +92,7 @@ def split_train_dev(sparc_samples: dict, ratio: float=0.8):
 
 def get_sparc_schema_description(proj_path: Path, sparc_tables: dict) -> dict:
 
-    class Description(LCBaseModel):
+    class Description(BaseModel):
         output: dict[str, dict[str, str]] = Field(description='Description of each column for all tables in the database')
 
     template = '''### Task
