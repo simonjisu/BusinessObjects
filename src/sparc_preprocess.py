@@ -80,7 +80,9 @@ def process_samples_sparc(all_data: list) -> dict[str, list[SparcSample]]:
             sample_id=i,
             db_id=db_id,
             interactions=[
-                QuestionSQL(question=x['utterance'], sql=preprocess_sql(x['query'])) for x in data['interaction']
+                QuestionSQL(
+                    question=x['utterance'], 
+                    sql=preprocess_sql(x['query'])) for x in data['interaction']
             ],
             final=QuestionSQL(
                 question=data['final']['utterance'], 

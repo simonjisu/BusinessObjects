@@ -95,3 +95,53 @@ def get_schema_str(
         schema_str += '\n\n[Primary Keys]\n'
         schema_str += '\n'.join(primary_keys)
     return schema_str
+
+def get_schema_str_with_tables(
+        schema: dict[str, dict[str, str]], 
+        table_list: list[str],
+        foreign_keys: list[str]=None, 
+        primary_keys: list[str]=None, 
+        col_explanation: Optional[dict[str, dict[str, str]]]=None,   # table_name: {col_name: col_desc}
+        col_fmt: str="'"
+    ) -> str:
+    """
+    col_explanation: overrides the column explanation in the schema
+    """
+    def format_column(col_name: str, col_type: str, col_fmt: str="'", col_desc: Optional[str]=None) -> str:
+        if col_desc is not None:
+            return f'{col_fmt}{col_name}{col_fmt}({col_type}): {col_desc}'
+        
+        return f'{col_fmt}{col_name}{col_fmt}({col_type})'
+    
+    def format_line_of_columns(cols: dict[str, str], col_fmt: str, col_descs: Optional[dict[str, str]]=None) -> str:
+        s = ''
+        for col_name, col_type in cols.items():
+            s += '  - ' + format_column(col_name, col_type, col_fmt, col_descs.get(col_name))
+            s += '\n'
+
+        return s
+
+    def format_list_of_columns(cols: dict[str, str], col_fmt: str) -> str:
+        return ', '.join([
+            format_column(col_name, col_type, col_fmt) for col_name, col_type in cols.items()
+        ])
+
+    schema_str = ''
+    schema_str += '[Table and Columns]\n'
+    for table_name, cols in schema.items():
+        if table_name not in table_list:
+            continue
+        if col_explanation is not None:
+            schema_str += f'Table Name: {table_name}\n'
+            col_descs = col_explanation.get(table_name)
+            schema_str += format_line_of_columns(cols, col_fmt, col_descs)
+        else:
+            schema_str += f'{table_name}: {format_list_of_columns(cols, col_fmt)}\n'
+    schema_str = schema_str.strip()
+    if foreign_keys is not None:
+        schema_str += '\n\n[Foreign Keys]\n'
+        schema_str += '\n'.join(foreign_keys)
+    if primary_keys is not None:
+        schema_str += '\n\n[Primary Keys]\n'
+        schema_str += '\n'.join(primary_keys)
+    return schema_str
