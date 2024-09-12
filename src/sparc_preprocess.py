@@ -7,14 +7,14 @@ from langchain_core.pydantic_v1 import BaseModel, Field
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-
+from typing import Optional
 from collections import defaultdict
 # from pydantic import BaseModel
 
 class DatabaseModel(BaseModel):
     db_id: str
     db_schema: dict[str, dict[str, str]]
-    col_explanation: dict[str, str]
+    col_explanation: dict[str, dict[str, str]]
     foreign_keys: list[str]
     primary_keys: list[str]
 
@@ -28,6 +28,11 @@ class SparcSample(BaseModel):
     interactions: list[QuestionSQL]
     final: QuestionSQL
 
+class SpiderSample(BaseModel):
+    sample_id: int = -1
+    db_id: str
+    final: QuestionSQL
+
 def load_sparc_data(data_path: Path):
     with (data_path / f'tables.json').open() as f:
         data_tables = json.load(f)
@@ -38,23 +43,28 @@ def load_sparc_data(data_path: Path):
     return data_tables, train_data, dev_data
 
 def preprocess_sql(sql: str) -> str:
-    return sql.replace('"', "'").strip()
+    # return sql.replace('"', "'").strip()
+    return sql.strip()
 
-def process_all_tables(tables: list) -> dict[str, DatabaseModel]:
+def process_all_tables(tables: list, descriptions: Optional[dict[str, dict[str, str]]]=None) -> dict[str, DatabaseModel]:
     database = defaultdict(DatabaseModel)
     for table in tables:
         db_id = table['db_id']
         data_dict = get_data_dict(table)
+        if descriptions is not None:
+            col_exps = descriptions[db_id]
+        else:
+            col_exps = data_dict['col_explanation']
         database[db_id] = DatabaseModel(
             db_id=db_id,
             db_schema=data_dict['schema'],
-            col_explanation=data_dict['col_explanation'],
+            col_explanation=col_exps,
             foreign_keys=data_dict['foreign_keys'],
             primary_keys=data_dict['primary_keys']
         )
     return database
 
-def filter_samples_by_count(all_data: dict, n: int=5) -> list:
+def filter_samples_by_count_sparc(all_data: dict, n: int=5) -> list:
     counter = defaultdict(int)
     for data in all_data:
         db_id = data['database_id']
@@ -62,7 +72,7 @@ def filter_samples_by_count(all_data: dict, n: int=5) -> list:
     all_data = list(filter(lambda x: counter[x['database_id']] >= n, all_data))
     return all_data
 
-def process_samples(all_data: list) -> dict[str, list[SparcSample]]:
+def process_samples_sparc(all_data: list) -> dict[str, list[SparcSample]]:
     data_by_db_id = defaultdict(list)
     for i, data in enumerate(all_data):
         db_id = data['database_id']
@@ -79,6 +89,31 @@ def process_samples(all_data: list) -> dict[str, list[SparcSample]]:
         )
         data_by_db_id[db_id].append(sample)
     return data_by_db_id
+
+def filter_samples_by_count_spider(all_data: dict, n: int=5) -> list:
+    counter = defaultdict(int)
+    for data in all_data:
+        db_id = data['db_id']
+        counter[db_id] += 1
+    all_data = list(filter(lambda x: counter[x['db_id']] >= n, all_data))
+    return all_data
+
+def process_samples_spider(all_data: list) -> dict[str, list[SparcSample]]:
+    data_by_db_id = defaultdict(list)
+    for i, data in enumerate(all_data):
+        db_id = data['db_id']
+        sample = SpiderSample(
+            sample_id=i,
+            db_id=db_id,
+            final=QuestionSQL(
+                question=data['question'], 
+                sql=preprocess_sql(data['query']), 
+            )
+        )
+        data_by_db_id[db_id].append(sample)
+    return data_by_db_id
+
+
 
 def split_train_dev(sparc_samples: dict, ratio: float=0.8):
     train_samples = []
@@ -146,9 +181,9 @@ if __name__ == '__main__':
     
     sparc_tables = process_all_tables(tables)
     # filter samples by count, must have at least 5 samples
-    all_data = filter_samples_by_count(train_data+dev_data, n=5)
+    all_data = filter_samples_by_count_sparc(train_data+dev_data, n=5)
     # process samples -> {db_id: list of samples}
-    sparc_samples = process_samples(all_data)
+    sparc_samples = process_samples_sparc(all_data)
     # change train/dev by sample
     train_samples, dev_samples = split_train_dev(sparc_samples, ratio=0.8)
 

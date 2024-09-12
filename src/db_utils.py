@@ -14,8 +14,6 @@ def get_data_dict(database: dict) -> dict[str, dict|list]:
         'foreign_keys': [],
         'primary_keys': [],
         'col_explanation': {}, 
-        'tables': {}, 
-        'columns': {}
     }
     
     for (i, col), (_, col_exp) in zip(database['column_names_original'], database['column_names']):
@@ -25,19 +23,16 @@ def get_data_dict(database: dict) -> dict[str, dict|list]:
         table_name = database['table_names_original'][i]
         table_name_exp = database['table_names'][i]
         col_type = database['column_types'][i]
-        col_name = f'{table_name}.{col}'
         
         if data_dict['schema'].get(table_name) is None:
             data_dict['schema'][table_name] = {}
         if col not in data_dict['schema'][table_name]:
             data_dict['schema'][table_name][col] = col_type
 
-        if table_name not in data_dict['tables']:
-            data_dict['tables'][table_name] = table_name_exp
-        if col_name not in data_dict['columns']:
-            data_dict['columns'][col_name] = col_exp
-        if is_lack_semantic_meanings(col, col_exp):
-            data_dict['col_explanation'][col_name] = col_exp
+        if data_dict['col_explanation'].get(table_name) is None:
+            data_dict['col_explanation'][table_name] = {}
+        if data_dict['col_explanation'][table_name].get(col) is None:
+            data_dict['col_explanation'][table_name][col] = col_exp
 
     for i, j in database['foreign_keys']:
         table_index1, col_name1 = database['column_names_original'][i]
