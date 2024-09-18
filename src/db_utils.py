@@ -54,45 +54,67 @@ def get_schema_str(
         foreign_keys: list[str]=None, 
         primary_keys: list[str]=None, 
         col_explanation: Optional[dict[str, dict[str, str]]]=None,   # table_name: {col_name: col_desc}
-        col_fmt: str="'"
+        col_fmt: str="'",
+        skip_type: bool=False,
+        remove_meta: bool=False
     ) -> str:
     """
     col_explanation: overrides the column explanation in the schema
     """
-    def format_column(col_name: str, col_type: str, col_fmt: str="'", col_desc: Optional[str]=None) -> str:
-        if col_desc is not None:
-            return f'{col_fmt}{col_name}{col_fmt}({col_type}): {col_desc}'
+    def format_column(
+            col_name: str, 
+            col_type: str, 
+            col_fmt: str="'", 
+            col_desc: Optional[str]=None,
+            skip_type: Optional[bool]=False
+        ) -> str:
+        if skip_type:
+            s = f'{col_fmt}{col_name}{col_fmt}'
+        else:
+            s = f'{col_fmt}{col_name}{col_fmt}({col_type})'
         
-        return f'{col_fmt}{col_name}{col_fmt}({col_type})'
+        if col_desc is not None:
+            return f'{s}: {col_desc}'
+        
+        return s
     
-    def format_line_of_columns(cols: dict[str, str], col_fmt: str, col_descs: Optional[dict[str, str]]=None) -> str:
+    def format_line_of_columns(
+            cols: dict[str, str], 
+            col_fmt: str, 
+            col_descs: Optional[dict[str, str]]=None, 
+            skip_type: Optional[bool]=False
+        ) -> str:
         s = ''
         for col_name, col_type in cols.items():
-            s += '  - ' + format_column(col_name, col_type, col_fmt, col_descs.get(col_name))
+            s += '  - ' + format_column(col_name, col_type, col_fmt, col_descs.get(col_name), skip_type)
             s += '\n'
 
         return s
 
-    def format_list_of_columns(cols: dict[str, str], col_fmt: str) -> str:
+    def format_list_of_columns(
+            cols: dict[str, str], 
+            col_fmt: str, 
+            skip_type: Optional[bool]=False
+        ) -> str:
         return ', '.join([
-            format_column(col_name, col_type, col_fmt) for col_name, col_type in cols.items()
+            format_column(col_name, col_type, col_fmt, None, skip_type) for col_name, col_type in cols.items()
         ])
 
     schema_str = ''
-    schema_str += '[Table and Columns]\n'
+    schema_str += '[Table and Columns]\n' if not remove_meta else ''
     for table_name, cols in schema.items():
         if col_explanation is not None:
             schema_str += f'Table Name: {table_name}\n'
             col_descs = col_explanation.get(table_name)
-            schema_str += format_line_of_columns(cols, col_fmt, col_descs)
+            schema_str += format_line_of_columns(cols, col_fmt, col_descs, skip_type)
         else:
-            schema_str += f'{table_name}: {format_list_of_columns(cols, col_fmt)}\n'
+            schema_str += f'{table_name}: {format_list_of_columns(cols, col_fmt, skip_type)}\n'
     schema_str = schema_str.strip()
     if foreign_keys is not None:
-        schema_str += '\n\n[Foreign Keys]\n'
+        schema_str += '\n\n[Foreign Keys]\n' if not remove_meta else ''
         schema_str += '\n'.join(foreign_keys)
     if primary_keys is not None:
-        schema_str += '\n\n[Primary Keys]\n'
+        schema_str += '\n\n[Primary Keys]\n' if not remove_meta else ''
         schema_str += '\n'.join(primary_keys)
     return schema_str
 
