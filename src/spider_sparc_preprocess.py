@@ -183,15 +183,21 @@ def process_samples_spider(all_data: list, tables: dict[str, DatabaseModel], ski
         data_by_db_id[db_id].append(sample)
     return data_by_db_id
 
-def split_train_dev(sparc_samples: dict, ratio: float=0.8):
+def split_train_dev_test(data_samples: dict, train_ratio: float=0.8, dev_ratio: float=0.1) -> tuple:
+    assert 1.0 - train_ratio - dev_ratio > 0, 'Not enough samples for test set'
     train_samples = []
     dev_samples = []
-    for db_id, samples in sparc_samples.items():
-        n_train = int(len(samples) * ratio)
-        assert len(samples[n_train:]) > 0, f'Not enough samples for dev set: {db_id}'
+    test_samples = []
+    for db_id, samples in data_samples.items():
+        n_train = int(len(samples) * train_ratio)
+        n_dev = int(len(samples) * dev_ratio)
+        n_test = len(samples) - n_train - n_dev
+        assert n_test > 0, f'Not enough samples for test set: {db_id}'
+        assert len(samples) == (len(samples[:n_train]) + len(samples[n_train:(n_dev+n_train)]) + len(samples[n_train+n_dev:])), f'Error: {db_id}'
         train_samples.extend(samples[:n_train])
-        dev_samples.extend(samples[n_train:])
-    return train_samples, dev_samples
+        dev_samples.extend(samples[n_train:(n_dev+n_train)])
+        test_samples.extend(samples[n_train+n_dev:])
+    return train_samples, dev_samples, test_samples
 
 def get_sparc_schema_description(proj_path: Path, sparc_tables: dict) -> dict:
 
@@ -333,7 +339,7 @@ if __name__ == '__main__':
     # process samples -> {db_id: list of samples}
     sparc_samples = process_samples_sparc(all_data)
     # change train/dev by sample
-    train_samples, dev_samples = split_train_dev(sparc_samples, ratio=0.8)
+    train_samples, dev_samples, test_samples = split_train_dev_test(sparc_samples, train_ratio=0.8, dev_ratio=0.1)
     
     save_samples_sparc(train_samples, proj_path / 'data' / 'sparc_train.json')
     save_samples_sparc(dev_samples, proj_path / 'data' / 'sparc_dev.json')
@@ -355,7 +361,7 @@ if __name__ == '__main__':
     skip = [3146, 4690, 4691]
     spider_samples = process_samples_spider(all_data, spider_tables, skip=skip)
     # change train/dev by sample
-    train_samples, dev_samples = split_train_dev(spider_samples, ratio=0.8)
+    train_samples, dev_samples, test_samples = split_train_dev_test(spider_samples, train_ratio=0.8, dev_ratio=0.1)
     print(f'Number of train: {len(train_samples)} | Number of dev: {len(dev_samples)}')
 
     save_samples_spider(train_samples, proj_path / 'data' / 'spider_train.json')
