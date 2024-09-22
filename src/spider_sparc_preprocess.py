@@ -72,13 +72,18 @@ class SpiderSample(BaseModel):
     db_id: str
     final: QuestionSQL
 
-def load_spider_sparc_data(data_path: Path):
+def load_spider_sparc_data(data_path: Path, load_test: bool=False) -> tuple:
     with (data_path / f'tables.json').open() as f:
         data_tables = json.load(f)
     with (data_path / f'train.json').open() as f:
         train_data = json.load(f)
     with (data_path / f'dev.json').open() as f:
         dev_data = json.load(f)
+
+    if load_test:
+        with (data_path / f'test.json').open() as f:
+            test_data = json.load(f)
+        return data_tables, train_data, dev_data, test_data
     return data_tables, train_data, dev_data
 
 def preprocess_sql(sql: str) -> str:
