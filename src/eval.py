@@ -108,6 +108,28 @@ def check_if_exists_orderby(sql):
     return False
 
 
+
+################################
+# val: number(float)/string(str)/sql(dict)
+# col_unit: (agg_id, col_id, isDistinct(bool))
+# val_unit: (unit_op, col_unit1, col_unit2)
+# table_unit: (table_type, col_unit/sql)
+# cond_unit: (not_op, op_id, val_unit, val1, val2)
+# condition: [cond_unit1, 'and'/'or', cond_unit2, ...]
+# sql {
+#   'select': (isDistinct(bool), [(agg_id, val_unit), (agg_id, val_unit), ...])
+#   'from': {'table_units': [table_unit1, table_unit2, ...], 'conds': condition}
+#   'where': condition
+#   'groupBy': [col_unit1, col_unit2, ...]
+#   'orderBy': ('asc'/'desc', [val_unit1, val_unit2, ...])
+#   'having': condition
+#   'limit': None/limit value
+#   'intersect': None/sql
+#   'except': None/sql
+#   'union': None/sql
+# }
+################################
+
 # Flag to disable value evaluation
 DISABLE_VALUE = False
 # Flag to disable distinct in select evaluation
