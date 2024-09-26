@@ -397,7 +397,7 @@ def count_component1(sql):
     ao = sql['from']['conds'][1::2] + sql['where'][1::2] + sql['having'][1::2]
     count += len([token for token in ao if token == 'or'])  # number of conditions with 'or' (disjunction)
     cond_units = sql['from']['conds'][::2] + sql['where'][::2] + sql['having'][::2]
-    count += len([cond_unit for cond_unit in cond_units if cond_unit[1] == WHERE_OPS.index('like')])
+    count += len([cond_unit for cond_unit in cond_units if cond_unit[1] == WHERE_OPS.index('like')])  # number of conditions with 'like'
 
     return count
 
