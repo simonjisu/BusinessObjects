@@ -75,6 +75,12 @@ class Schema:
 
         return idMap
 
+    def get_table_name(self, column: str):
+        for table, cols in self.schema.items():
+            if column.lower() in cols:
+                return table
+        
+        return None
 
 def get_schema(db):
     """
@@ -178,7 +184,15 @@ def parse_col(toks, start_idx, tables_with_alias, schema, default_tables=None):
     tok = toks[start_idx]
     if tok == "*":
         return start_idx + 1, schema.idMap[tok]
-
+    
+    # check if the token is number
+    if tok.replace('.', '').isnumeric():
+        return start_idx+1, tok
+    
+    # check if the token is a unit operation
+    if tok in UNIT_OPS:
+        return start_idx+1, tok
+    
     if '.' in tok:  # if token is a composite
         alias, col = tok.split('.')
         key = tables_with_alias[alias] + "." + col
@@ -249,6 +263,7 @@ def parse_val_unit(toks, start_idx, tables_with_alias, schema, default_tables=No
     if idx < len_ and toks[idx] in UNIT_OPS:
         unit_op = UNIT_OPS.index(toks[idx])
         idx += 1
+        print(idx, toks)
         idx, col_unit2 = parse_col_unit(toks, idx, tables_with_alias, schema, default_tables)
 
     if isBlock:
