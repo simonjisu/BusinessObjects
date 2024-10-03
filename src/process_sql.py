@@ -54,7 +54,7 @@ class Schema:
         self._idMap = self._map(self._schema)
 
     @property
-    def schema(self):
+    def schema(self) -> dict:
         return self._schema
 
     @property
@@ -75,8 +75,12 @@ class Schema:
 
         return idMap
 
-    def get_table_name(self, column: str):
-        for table, cols in self.schema.items():
+    def get_table_name(self, column: str, tables: list[str]=[]):
+        if tables:
+            schema = dict(list(filter(lambda x: x[0] in tables, self.schema.items())))
+        else:
+            schema = self.schema
+        for table, cols in schema.items():
             if column.lower() in cols:
                 return table
         
