@@ -68,10 +68,18 @@ class SparcSample(BaseModel):
     interactions: list[QuestionSQL]
     final: QuestionSQL
     
+class BusinessObject(BaseModel):
+    obj_id: str
+    obj_name: Optional[str] = None
+    virtual_table: str
+    description: str
+
 class SpiderSample(BaseModel):
-    sample_id: int = -1
+    sample_id: int|str = None
     db_id: str
     final: QuestionSQL
+    bo: Optional[BusinessObject] = None
+
 
 def load_spider_sparc_data(data_path: Path, load_test: bool=False) -> tuple:
     with (data_path / f'tables.json').open() as f:
