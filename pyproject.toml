@@ -28,4 +28,6 @@ dependencies = [
     "protobuf<=5.0.0",
     "langchain-google-genai==2.0.0",
     "langchain-ollama>=0.2.0",
+    "faiss-cpu>=1.8.0.post1",
+    "langchain-community>=0.3.1",
 ]
