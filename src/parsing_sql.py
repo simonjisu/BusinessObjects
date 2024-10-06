@@ -535,7 +535,7 @@ def extract_condition(statement: Statement):
         extract_where_having(stmt, conditions, ControlFlow())
         extract_operation_types(conditions, operator_types)
     conditions = [sqlparse.format(str(c), reindent=True).strip() for c in conditions]
-    
+    conditions = set(sorted(conditions))
     return conditions, operator_types
 
 def process_where_having(token, cond: list, conditions: list, between_seen: bool=False):
