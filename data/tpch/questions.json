@@ -1,0 +1,631 @@
+[
+    {
+        "instance_id": "q11",
+        "ref_id": "q1",
+        "question": "What is the summary pricing report for all line items that were shipped before 60 days of the greatest shipping date, grouped by return flag and line status? Lists totals for quantity, extended price, discounted extended price, discounted extended price plus tax, average quantity, average extended price, and average discount.",
+        "hints": [
+            "discounted extended price = sum(l_extendedprice * (1 - l_discount))", 
+            "discounted extended price plus tax = sum(l_extendedprice * (1 - l_discount) * (1 + l_tax))", 
+            "greatest ship date = max(l_shipdate)"
+        ],
+        "gold_sql": "gold/q11.sql"
+    },
+    {
+        "instance_id": "q12",
+        "ref_id": "q1",
+        "question": "Can you provide the totals for extended price, discounted extended price, and discounted extended price plus tax for line items shipped before the period of 3 months prior to the latest shipping date, grouped by return flag and line status?",
+        "hints": [
+            "discounted extended price = sum(l_extendedprice * (1 - l_discount))", 
+            "discounted extended price plus tax = sum(l_extendedprice * (1 - l_discount) * (1 + l_tax))", 
+            "latest ship date = max(l_shipdate)"
+        ],
+        "gold_sql": "gold/q12.sql"
+    },
+    {
+        "instance_id": "q13",
+        "ref_id": "q1",
+        "question": "What are the averages for quantity, extended price, and discount for all line items shipped before the timeframe of a quarter from the maximum ship date, grouped by return flag and line status?",
+        "hints": [
+            "maximum ship date = max(l_shipdate)"
+        ],
+        "gold_sql": "gold/q13.sql"
+    },
+    {
+        "instance_id": "q21",
+        "ref_id": "q2",
+        "question": "Find top 100 suppliers with the highest account balance that I can place an order for parts made of COPPER, sized 42, and based in EUROPE, with the lowest supply cost. Lists the supplier's account balance, name and nation; the part's number and manufacturer; the supplier's address, phone number and comment information.",
+        "hints": "",
+        "gold_sql": "gold/q21.sql"
+    },
+    {
+        "instance_id": "q22",
+        "ref_id": "q2",
+        "question": "Which suppliers offer parts made of 'BRASS', sized 20, and located in AMERICA, at the lowest cost, and could you list the top 100 suppliers with the highest account balances? Lists the supplier's account balance, name and nation; the part's number and manufacturer; the supplier's address, phone number and comment information.",
+        "hints": "",
+        "gold_sql": "gold/q22.sql"
+    },
+    {
+        "instance_id": "q23",
+        "ref_id": "q2",
+        "question": "Can you find the suppliers to order parts that include 'TIN', are size 15, and located in ASIA, while ensuring the lowest supply cost and showing the top 100 suppliers with the highest account balance? Lists the supplier's account balance, name and nation; the part's number and manufacturer; the supplier's address, phone number and comment information.",
+        "hints": "",
+        "gold_sql": "gold/q23.sql"
+    },
+    {
+        "instance_id": "q31",
+        "ref_id": "q3",
+        "question": "Can you show me the top 10 unshipped orders by value as of 1995-03-20 in the HOUSEHOLD market segment? List in decreasing order of revenue with order key, order date and shipping priority.",
+        "hints": [
+            "order value = sum(l_extendedprice*(1-l_discount))"
+        ],
+        "gold_sql": "gold/q31.sql"
+    },
+    {
+        "instance_id": "q32",
+        "ref_id": "q3",
+        "question": "What are the 10 highest-value unshipped orders in the AUTOMOBILE customer segment as of 1995-03-30? List in decreasing order of revenue with order key, order date and shipping priority.",
+        "hints": [
+            "order value = sum(l_extendedprice*(1-l_discount))"
+        ],
+        "gold_sql": "gold/q32.sql"
+    },
+    {
+        "instance_id": "q33",
+        "ref_id": "q3",
+        "question": "Could you find the 10 most valuable unshipped orders as of 1995-03-01, within the BUILDING market segment? List in decreasing order of revenue with order key, order date and shipping priority.",
+        "hints": [
+            "order value = sum(l_extendedprice*(1-l_discount))"
+        ],
+        "gold_sql": "gold/q33.sql"
+    },
+    {
+        "instance_id": "q41",
+        "ref_id": "q4",
+        "question": "Can you count the number of orders placed in the first quarter of 1993 where at least one item was delivered later than its committed date, and list the results by order priority in ascending order?",
+        "hints": "",
+        "gold_sql": "gold/q41.sql"
+    },
+    {
+        "instance_id": "q42",
+        "ref_id": "q4",
+        "question": "How many orders were made in the third quarter of 1993 with at least one late-delivered item, and could you show the count sorted by order priority in ascending order?",
+        "hints": "",
+        "gold_sql": "gold/q42.sql"
+    },
+    {
+        "instance_id": "q43",
+        "ref_id": "q4",
+        "question": "What is the count of orders from the second quarter of 1993 where at least one line item arrived later than its committed date, organized by order priority in ascending order?",
+        "hints": "",
+        "gold_sql": "gold/q43.sql"
+    },
+    {
+        "instance_id": "q51",
+        "ref_id": "q5",
+        "question": "What was the revenue volume from local supplier transactions for each nation in the EUROPE region for the year 1993, listed in descending order of revenue?",
+        "hints": [
+            "revenue = sum(l_extendedprice*(1-l_discount))",
+            "local suppliers mean the customer ordering parts and the supplier filling them were both within a nation"
+        ],
+        "gold_sql": "gold/q51.sql"
+    },
+    {
+        "instance_id": "q52",
+        "ref_id": "q5",
+        "question": "Can you provide the revenue volume from local supplier transactions for each nation in ASIA for the year 1995, arranged in descending order of revenue?",
+        "hints": [
+            "revenue = sum(l_extendedprice*(1-l_discount))",
+            "local suppliers mean the customer ordering parts and the supplier filling them were both within a nation"
+        ],
+        "gold_sql": "gold/q52.sql"
+    },
+    {
+        "instance_id": "q53",
+        "ref_id": "q5",
+        "question": "What was the revenue volume from local supplier transactions for each nation in the AMERICA region in 1997, sorted by revenue in descending order?",
+        "hints": [
+            "revenue = sum(l_extendedprice*(1-l_discount))",
+            "local suppliers mean the customer ordering parts and the supplier filling them were both within a nation"
+        ],
+        "gold_sql": "gold/q53.sql"
+    },
+    {
+        "instance_id": "q54",
+        "ref_id": "q5",
+        "question": "Which nations in the EUROPE region had the highest revenue volumes from local suppliers in 1993, and can you provide their names along with the revenue amounts?",
+        "hints": [
+            "revenue = sum(l_extendedprice*(1-l_discount))",
+            "local suppliers mean the customer ordering parts and the supplier filling them were both within a nation"
+        ],
+        "gold_sql": "gold/q54.sql"
+    },
+    {
+        "instance_id": "q55",
+        "ref_id": "q5",
+        "question": "What were the nations in ASIA with the highest revenue volumes from local suppliers in 1995, including their names and the corresponding revenue figures?",
+        "hints": [
+            "revenue = sum(l_extendedprice*(1-l_discount))",
+            "local suppliers mean the customer ordering parts and the supplier filling them were both within a nation"
+        ],
+        "gold_sql": "gold/q55.sql"
+    },
+    {
+        "instance_id": "q56",
+        "ref_id": "q5",
+        "question": "Can you list the nations in the AMERICA region that achieved the highest revenue volumes from local suppliers in 1997, along with their names and revenue amounts?",
+        "hints": [
+            "revenue = sum(l_extendedprice*(1-l_discount))",
+            "local suppliers mean the customer ordering parts and the supplier filling them were both within a nation"
+        ],
+        "gold_sql": "gold/q56.sql"
+    },
+    {
+        "instance_id": "q61",
+        "ref_id": "q6",
+        "question": "What would have been the total revenue increase in year 1993 if we had eliminated discounts between 0.01 and 0.03 for line items with quantities below 24?",
+        "hints": [
+            "revenue increase = sum(l_extendedprice*l_discount)"
+        ],
+        "gold_sql": "gold/q61.sql"
+    },
+    {
+        "instance_id": "q62",
+        "ref_id": "q6",
+        "question": "How much additional revenue could have been generated in year 1995 by removing discounts ranging from 0.05 to 0.07 for line items with quantities under 25?",
+        "hints": [
+            "revenue increase = sum(l_extendedprice*l_discount)"
+        ],
+        "gold_sql": "gold/q62.sql"
+    },
+    {
+        "instance_id": "q63",
+        "ref_id": "q6",
+        "question": "In year 1997, what would the total revenue increase be if discounts between 0.08 and 0.10 were eliminated for line items with quantities below 24?",
+        "hints": [
+            "revenue increase = sum(l_extendedprice*l_discount)"
+        ],
+        "gold_sql": "gold/q63.sql"
+    },
+    {
+        "instance_id": "q71",
+        "ref_id": "q7",
+        "question": "What was the gross discounted revenue for shipments between ALGERIA and GERMANY in the years 1995 and 1996? Orders the answer by Supplier nation, Customer nation, and year (all ascending)",
+        "hints": [
+            "gross discounted revenue = l_extendedprice * (1 - l_discount)",
+            "shipments from a nation to other nation means parts were shipped from a supplier in either nation to a customer in the other nation."
+        ],
+        "gold_sql": "gold/q71.sql"
+    },
+    {
+        "instance_id": "q72",
+        "ref_id": "q7",
+        "question": "How much gross discounted revenue was generated from shipments between CANADA and the UNITED STATES in 1995 and 1996? Orders the answer by Supplier nation, Customer nation, and year (all ascending)",
+        "hints": [
+            "gross discounted revenue = l_extendedprice * (1 - l_discount)",
+            "shipments from a nation to other nation means parts were shipped from a supplier in either nation to a customer in the other nation."
+        ],
+        "gold_sql": "gold/q72.sql"
+    },
+    {
+        "instance_id": "q73",
+        "ref_id": "q7",
+        "question": "What was the gross discounted revenue for shipments for two countries FRANCE and INDONESIA during the years 1995 and 1996? Orders the answer by Supplier nation, Customer nation, and year (all ascending)",
+        "hints": [
+            "gross discounted revenue = l_extendedprice * (1 - l_discount)",
+            "shipments from a nation to other nation means parts were shipped from a supplier in either nation to a customer in the other nation."
+        ],
+        "gold_sql": "gold/q73.sql"
+    },
+    {
+        "instance_id": "q81",
+        "ref_id": "q8",
+        "question": "How has the market share of INDONESIA in the ASIA region for the part type ECONOMY ANODIZED STEEL changed during the years 1995 and 1996?",
+        "hints": [
+            "volume = l_extendedprice * (1-l_discount)",
+            "market share (revenue share): volume of a nation as the fraction of  total volume of all nations"
+        ],
+        "gold_sql": "gold/q81.sql"
+    },
+    {
+        "instance_id": "q82",
+        "ref_id": "q8",
+        "question": "What changes occurred in the market share of BRAZIL in the AMERICA region for part type LARGE POLISHED COPPER during 1995 and 1996?",
+        "hints": [
+            "volume = l_extendedprice * (1-l_discount)",
+            "market share (revenue share): volume of a nation as the fraction of  total volume of all nations"
+        ],
+        "gold_sql": "gold/q82.sql"
+    },
+    {
+        "instance_id": "q83",
+        "ref_id": "q8",
+        "question": "How did the market share of FRANCE in the EUROPE region for part type STANDARD PLATED TIN evolve between 1995 and 1996?",
+        "hints": [
+            "volume = l_extendedprice * (1-l_discount)",
+            "market share (revenue share): volume of a nation as the fraction of  total volume of all nations"
+        ],
+        "gold_sql": "gold/q83.sql"
+    },
+    {
+        "instance_id": "q84",
+        "ref_id": "q8",
+        "question": "Can you provide the comparison of revenue share of INDONESIA in the ASIA region for the part type ECONOMY ANODIZED STEEL in the years 1995 and 1996?",
+        "hints": [
+            "volume = l_extendedprice * (1-l_discount)",
+            "market share (revenue share): volume of a nation as the fraction of total volume of all nations"
+        ],
+        "gold_sql": "gold/q84.sql"
+    },
+    {
+        "instance_id": "q91",
+        "ref_id": "q9",
+        "question": "Can you provide a report on the profit margins for parts containing \"antique\" in their names, broken down by supplier nation and listed in descending order by year?",
+        "hints": [
+            "The profit is defined as the sum of [(l_extendedprice*(1-l_discount)) - (ps_supplycost * l_quantity)]"
+        ],
+        "gold_sql": "gold/q91.sql"
+    },
+    {
+        "instance_id": "q92",
+        "ref_id": "q9",
+        "question": "What are the profit for parts with \"green\" in their names, categorized by supplier nation and displayed in descending order by year?",
+        "hints": [
+            "The profit is defined as the sum of [(l_extendedprice*(1-l_discount)) - (ps_supplycost * l_quantity)]"
+        ],
+        "gold_sql": "gold/q92.sql"
+    },
+    {
+        "instance_id": "q93",
+        "ref_id": "q9",
+        "question": "Could you generate a report on the profit for parts containing \"turquoise\" in their names, organized by supplier nation and listed in descending order by year?",
+        "hints": [
+            "The profit is defined as the sum of [(l_extendedprice*(1-l_discount)) - (ps_supplycost * l_quantity)]"
+        ],
+        "gold_sql": "gold/q93.sql"
+    },
+    {
+        "instance_id": "q94",
+        "ref_id": "q9",
+        "question": "What is the profit for each supplier nation, broken down by year, for parts with \"green\" in their names.",
+        "hints": [
+            "The profit is defined as the sum of [(l_extendedprice*(1-l_discount)) - (ps_supplycost * l_quantity)]"
+        ],
+        "gold_sql": "gold/q94.sql"
+    },
+    {
+        "instance_id": "q101",
+        "ref_id": "q10",
+        "question": "For the quarter starting on 1993-07-01, who are the top 20 customers by lost revenue due to returned parts, and what is the detailed information on their returns? Lists the customer's name, address, nation, phone number, account balance, comment information and revenue lost.",
+        "hints": [
+            "Revenue lost is defined as sum(l_extendedprice*(1-l_discount)) for all qualifying lineitems",
+            "returned part is defined as  l_returnflag = 'R'"
+        ],
+        "gold_sql": "gold/q101.sql"
+    },
+    {
+        "instance_id": "q102",
+        "ref_id": "q10",
+        "question": "Can you provide a breakdown of the lost revenue, customer names, addresses, and account balances for the top 20 customers who returned parts in the quarter beginning on 1993-10-01?",
+        "hints": [
+            "Revenue lost is defined as sum(l_extendedprice*(1-l_discount)) for all qualifying lineitems",
+            "returned part is defined as  l_returnflag = 'R'"
+        ],
+        "gold_sql": "gold/q102.sql"
+    },
+    {
+        "instance_id": "q103",
+        "ref_id": "q10",
+        "question": "Find me top 20 lost revenue customers due to the returned items, in the quarter on 1995-01-01. Lists the customer's name, address, nation, phone number, account balance, comment information and revenue lost.",
+        "hints": [
+            "Revenue lost is defined as sum(l_extendedprice*(1-l_discount)) for all qualifying lineitems",
+            "returned part is defined as  l_returnflag = 'R'"
+        ],
+        "gold_sql": "gold/q103.sql"
+    },
+    {
+        "instance_id": "q111",
+        "ref_id": "q11",
+        "question": "Can you show me the top parts by value from suppliers in VIETNAM that make up more than 0.0001 of the total stock value? Displays top 10 the part number and the value of those parts in descending order of value.",
+        "hints": [
+            "part value = sum(ps_supplycost * ps_availqty)"
+        ],
+        "gold_sql": "gold/q111.sql"
+    },
+    {
+        "instance_id": "q112",
+        "ref_id": "q11",
+        "question": "Can you provide the top parts by value from suppliers in EGYPT that contribute more than 0.0001 of the total stock value? Displays top 10 the part number and the value of those parts in descending order of value.",
+        "hints": [
+            "part value = sum(ps_supplycost * ps_availqty)"
+        ],
+        "gold_sql": "gold/q112.sql"
+    },
+    {
+        "instance_id": "q113",
+        "ref_id": "q11",
+        "question": "What are the top parts by value from suppliers in PERU that account for more than 0.0001 of the total stock value? Displays top 10 the part number and the value of those parts in descending order of value.",
+        "hints": [
+            "part value = sum(ps_supplycost * ps_availqty)"
+        ],
+        "gold_sql": "gold/q113.sql"
+    },
+    {
+        "instance_id": "q114",
+        "ref_id": "q11",
+        "question": "What are the part numbers and their respective values, sorted in descending order, for the key stock items from suppliers in BRAZIL with a value greater than 0.0001 of the total? List top 10 of them.",
+        "hints": [
+            "part value = sum(ps_supplycost * ps_availqty)"
+        ],
+        "gold_sql": "gold/q114.sql"
+    },
+    {
+        "instance_id": "q115",
+        "ref_id": "q11",
+        "question": "Can you list the part numbers and values, sorted in descending order, for the key stock items from suppliers in GERMANY that have a value greater than 0.0001 of the total? List top 10 of them",
+        "hints": [
+            "part value = sum(ps_supplycost * ps_availqty)"
+        ],
+        "gold_sql": "gold/q115.sql"
+    },
+    {
+        "instance_id": "q121",
+        "ref_id": "q12",
+        "question": "Can you give me a breakdown of how many late line items were received by customers in 1993 for MAIL and REG AIR ship modes, split by order priority (URGENT/HIGH vs. others), considering only line items that were shipped before the commit date?",
+        "hints": [
+            "o_orderpriority: priority orders level"
+        ],
+        "gold_sql": "gold/q121.sql"
+    },
+    {
+        "instance_id": "q122",
+        "ref_id": "q12",
+        "question": "Can you provide a breakdown of how many late line items were received by customers in 1995 for AIR and TRUCK ship modes, categorized by order priority (URGENT/HIGH vs. others), and considering only those that were shipped before the commit date?",
+        "hints": [
+            "o_orderpriority: priority orders level"
+        ],
+        "gold_sql": "gold/q122.sql"
+    },
+    {
+        "instance_id": "q123",
+        "ref_id": "q12",
+        "question": "What is the breakdown of late line items received by customers in 1997 for SHIP and FOB ship modes, divided by order priority (URGENT/HIGH vs. others), while accounting only for items shipped before the commit date?",
+        "hints": [
+            "o_orderpriority: priority orders level"
+        ],
+        "gold_sql": "gold/q123.sql"
+    },
+    {
+        "instance_id": "q124",
+        "ref_id": "q12",
+        "question": "How many line items shipped before the commit date but were still received late in 1995, by MAIL and TRUCK shipping modes, and partitioned by priority level (URGENT/HIGH vs. others)?",
+        "hints": [
+            "o_orderpriority: priority orders level"
+        ],
+        "gold_sql": "gold/q124.sql"
+    },
+    {
+        "instance_id": "q131",
+        "ref_id": "q13",
+        "question": "Can you provide the distribution of customers based on the number of orders they have made, including those with no orders at all, while excluding special orders identified by the words \"special\" and \"packages\" in the order comments?",
+        "hints": "",
+        "gold_sql": "gold/q131.sql"
+    },
+    {
+        "instance_id": "q132",
+        "ref_id": "q13",
+        "question": "Could you give the distribution of customers based on their number of orders, including those with no orders, excluding special orders that contain the words \"pending\" and \"requests\" in the order comments?",
+        "hints": "",
+        "gold_sql": "gold/q132.sql"
+    },
+    {
+        "instance_id": "q133",
+        "ref_id": "q13",
+        "question": "Can you show the distribution of customers based on the number of orders they have placed, including those with no orders, while excluding special orders identified by the words \"unusual\" and \"accounts\" in the order comments?",
+        "hints": "",
+        "gold_sql": "gold/q133.sql"
+    },
+    {
+        "instance_id": "q141",
+        "ref_id": "q14",
+        "question": "What percentage of the total revenue for date of 1993-09-01 came from promotional parts that were actually shipped during that month?",
+        "hints": [
+            "promo_revenue = sum(l_extendedprice * (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q141.sql"
+    },
+    {
+        "instance_id": "q142",
+        "ref_id": "q14",
+        "question": "What percentage of the total revenue for date of 1995-03-01 was generated from promotional parts that were shipped during that month?",
+        "hints": [
+            "promo_revenue = sum(l_extendedprice * (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q142.sql"
+    },
+    {
+        "instance_id": "q143",
+        "ref_id": "q14",
+        "question": "What percentage of the total revenue for date of 1997-05-01 came from promotional parts that were actually shipped within that month?",
+        "hints": [
+            "promo_revenue = sum(l_extendedprice * (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q143.sql"
+    },
+    {
+        "instance_id": "q151",
+        "ref_id": "q15",
+        "question": "Who was the top supplier contributing to the overall revenue for parts shipped during the quarter beginning on 1993-03-01, and can you include all suppliers in case of a tie?",
+        "hints": [
+            "total_revenue = sum(l_extendedprice * (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q151.sql"
+    },
+    {
+        "instance_id": "q152",
+        "ref_id": "q15",
+        "question": "Who was the leading supplier in terms of overall revenue for parts shipped during the quarter starting on 1995-07-01, and can you include all suppliers in case of a tie?",
+        "hints": [
+            "total_revenue = sum(l_extendedprice * (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q152.sql"
+    },
+    {
+        "instance_id": "q153",
+        "ref_id": "q15",
+        "question": "Who was the top supplier contributing to the overall revenue for parts shipped during the quarter beginning on 1996-09-01, and can you include all suppliers in case of a tie?",
+        "hints": [
+            "total_revenue = sum(l_extendedprice * (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q153.sql"
+    },
+    {
+        "instance_id": "q161",
+        "ref_id": "q16",
+        "question": "How many suppliers can provide parts of eight different sizes (49, 14, 23, 45, 19, 3, 36, 9) excluding those of the type MEDIUM POLISHED, from Brand#45, and not from suppliers with comments containing the words \"Customer\" and \"Complaints\"? List top 10 results in descending count and ascending brand, type, and size.",
+        "hints": "",
+        "gold_sql": "gold/q161.sql"
+    },
+    {
+        "instance_id": "q162",
+        "ref_id": "q16",
+        "question": "How many suppliers can provide parts of eight different sizes (49, 14, 23, 45, 19, 3, 36, 9) excluding those of the type SMALL BURNISHED, from Brand#32, and not from suppliers with comments containing the words \"Customer\" and \"Complaints\"? List top 10 results in descending count and ascending brand, type, and size.",
+        "hints": "",
+        "gold_sql": "gold/q162.sql"
+    },
+    {
+        "instance_id": "q163",
+        "ref_id": "q16",
+        "question": "How many suppliers can provide parts of eight different sizes (49, 14, 23, 45, 19, 3, 36, 9) excluding those of the type STANDARD ANODIZED, from Brand#15, and not from suppliers with comments containing the words \"Customer\" and \"Complaints\"? List top 10 results in descending count and ascending brand, type, and size.",
+        "hints": "",
+        "gold_sql": "gold/q163.sql"
+    },
+    {
+        "instance_id": "q171",
+        "ref_id": "q17",
+        "question": "What is the average line item quantity for parts of Brand#23 and of MED BOX container type ordered for all orders, and how much yearly gross undiscounted revenue loss would occur if we no longer accepted orders for these parts with a quantity of less than 20% of that average?",
+        "hints": [
+            "gross undiscounted revenue  = sum(l_extendedprice)"
+        ],
+        "gold_sql": "gold/q171.sql"
+    },
+    {
+        "instance_id": "q172",
+        "ref_id": "q17",
+        "question": "What is the average line item quantity for parts of Brand#14 and of JUMBO JAR container type ordered for all orders, and how much yearly gross undiscounted revenue loss would result if we no longer accepted orders for these parts with a quantity of less than 20% of that average?",
+        "hints": [
+            "gross undiscounted revenue  = sum(l_extendedprice)"
+        ],
+        "gold_sql": "gold/q172.sql"
+    },
+    {
+        "instance_id": "q173",
+        "ref_id": "q17",
+        "question": "What is the average line item quantity for parts of Brand#45 and of WRAP PKG container type ordered for all orders, and how much yearly gross undiscounted revenue loss would be incurred if we no longer accepted orders for these parts with a quantity of less than 20% of that average?",
+        "hints": [
+            "gross undiscounted revenue  = sum(l_extendedprice)"
+        ],
+        "gold_sql": "gold/q173.sql"
+    },
+    {
+        "instance_id": "q181",
+        "ref_id": "q18",
+        "question": "Who are the top 100 customers that have ever placed orders with a total quantity above 300? Please list the customer name, customer key, order key, date, total price, and the quantity for the order.",
+        "hints": [
+            "total quantity: sum(l_quantity)"
+        ],
+        "gold_sql": "gold/q181.sql"
+    },
+    {
+        "instance_id": "q182",
+        "ref_id": "q18",
+        "question": "Who are the top 100 customers that have ever placed orders with a total quantity above 312? Can you provide the customer name, customer key, order key, date, total price, and the quantity for the order?",
+        "hints": [
+            "total quantity: sum(l_quantity)"
+        ],
+        "gold_sql": "gold/q182.sql"
+    },
+    {
+        "instance_id": "q183",
+        "ref_id": "q18",
+        "question": "Who are the top 100 customers that have ever placed orders with a total quantity above 315? Please include the customer name, customer key, order key, date, total price, and the quantity for the order.",
+        "hints": [
+            "total quantity: sum(l_quantity)"
+        ],
+        "gold_sql": "gold/q183.sql"
+    },
+    {
+        "instance_id": "q191",
+        "ref_id": "q19",
+        "question": "What is the total discounted revenue for orders shipped by air, delivered in person within the quantity range of 1 and 11 for parts selected based on Brand#12, a container name containing 'SM' and sizes between 1 and 5?",
+        "hints": [
+            "total discounted revenue = sum(l_extendedprice* (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q191.sql"
+    },
+    {
+        "instance_id": "q192",
+        "ref_id": "q19",
+        "question": "What is the total discounted revenue for orders shipped by air, delivered in person within the quantity range of 10 and 20 for parts selected based on Brand#23, a container name containing 'LG' and sizes between 1 and 10?",
+        "hints": [
+            "total discounted revenue = sum(l_extendedprice* (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q192.sql"
+    },
+    {
+        "instance_id": "q193",
+        "ref_id": "q19",
+        "question": "What is the total discounted revenue for orders shipped by air, delivered in person within the quantity range of 20 and 30 for parts selected based on Brand#34, a container name containing 'MED' and sizes between 1 and 15?",
+        "hints": [
+            "total discounted revenue = sum(l_extendedprice* (1 - l_discount))"
+        ],
+        "gold_sql": "gold/q193.sql"
+    },
+    {
+        "instance_id": "q201",
+        "ref_id": "q20",
+        "question": "Which suppliers had an excess of more than 50% of a specific part they shipped in 1993 for CANADA, considering only parts whose names include the keyword \"forest\"? List 100 of them.",
+        "hints": "",
+        "gold_sql": "gold/q201.sql"
+    },
+    {
+        "instance_id": "q202",
+        "ref_id": "q20",
+        "question": "Which suppliers have an excess of more than 50% of a specific part they shipped in 1995 for VIETNAM, considering only parts whose names include the keyword \"green\"? List 100 of them.",
+        "hints": "",
+        "gold_sql": "gold/q202.sql"
+    },
+    {
+        "instance_id": "q203",
+        "ref_id": "q20",
+        "question": "Which suppliers had an excess of more than 50% of a specific part they shipped in 1997 for GERMANY, considering only parts whose names include the keyword \"light\"? List 100 of them.",
+        "hints": "",
+        "gold_sql": "gold/q203.sql"
+    },
+    {
+        "instance_id": "q211",
+        "ref_id": "q21",
+        "question": "Which suppliers from GERMANY were the only ones who failed to meet the committed delivery date in multi-supplier orders with status 'F'? List top 100 of suppliers and the number of late delivery.",
+        "hints": [
+            "failed to meet the committed delivery date: l_receiptdate > l_commitdate"
+        ],
+        "gold_sql": "gold/q211.sql"
+    },
+    {
+        "instance_id": "q212",
+        "ref_id": "q21",
+        "question": "Which suppliers from SAUDI ARABIA were the only ones who failed to meet the committed delivery date in multi-supplier orders with status 'F'? List top 100 of suppliers and the number of late delivery.",
+        "hints": [
+            "failed to meet the committed delivery date: l_receiptdate > l_commitdate"
+        ],
+        "gold_sql": "gold/q212.sql"
+    },
+    {
+        "instance_id": "q213",
+        "ref_id": "q21",
+        "question": "Which suppliers from the UNITED STATES were the only ones who failed to meet the committed delivery date in multi-supplier orders with status 'F'? List top 100 of suppliers and the number of late delivery.",
+        "hints": [
+            "failed to meet the committed delivery date: l_receiptdate > l_commitdate"
+        ],
+        "gold_sql": "gold/q213.sql"
+    }
+]
