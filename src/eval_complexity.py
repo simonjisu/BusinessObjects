@@ -1,11 +1,173 @@
+
 from tqdm import tqdm
 from pathlib import Path
-from process_sql import get_schema, Schema
-from parsing_sql import extract_aliases, extract_selection, extract_condition, extract_aggregation, extract_nested_setoperation, extract_others
+from .process_sql import get_schema, Schema
+from .parsing_sql import extract_aliases, extract_selection, extract_condition, extract_aggregation, extract_nested_setoperation, extract_others
 import json
 import sqlparse
+from typing import Optional
+import numpy as np
+import pandas as pd
 
 proj_path = Path(__file__).resolve().parents[1]
+
+def partial_match(gold_set, predict_set):
+    intersection = gold_set.intersection(predict_set)
+    union = gold_set.union(predict_set)
+    
+    # IoU
+    iou = len(intersection) / len(union) if union else 0
+    
+    # Precision
+    precision = len(intersection) / len(predict_set) if predict_set else 0
+    
+    # Recall
+    recall = len(intersection) / len(gold_set) if gold_set else 0
+    
+    # F1-Score
+    f1_score = 2 * (precision * recall) / (precision + recall) if (precision + recall) else 0
+    
+    return iou, precision, recall, f1_score
+
+def derive_final_score(gold_sets: list, predict_sets: list):
+    # Calculate F1-score for each aspect
+    empty_gold = [False if g else True for g in gold_sets]
+    empty_pred = [False if p else True for p in predict_sets]
+    if all(empty_gold) and all(empty_pred):
+        return 1.0
+    elif all(empty_gold) and not all(empty_pred):
+        # If all gold sets are empty, return None
+        return 0.0
+    f1_scores = []
+    for i, (gold, pred) in enumerate(zip(gold_sets, predict_sets)):
+        if not empty_gold[i]:
+            *_, f1_score = partial_match(gold, pred)
+            f1_scores.append(f1_score)
+    assert len(f1_scores) > 0, 'No F1-score calculated'
+    # modified weights if the gold set is empty
+
+    weights = [1/len(f1_scores)]*len(f1_scores)
+    weighted_f1_score = np.array(f1_scores) * np.array(weights)
+    final_score = weighted_f1_score.sum()
+    # Combine the scores using the specified weights
+    return final_score
+
+def normalize_values(x, min_value=0, max_value=6):
+    normalized = (x - min_value) / (max_value - min_value)
+    return normalized
+
+def tanh(x: np.ndarray, k: float):
+    normalized = normalize_values(x, max_value=k)
+    return np.tanh(np.log(1+normalized.sum()))
+
+def derive_complexity(x: list[int], k=6):
+    score = tanh(np.array(x), k)
+    return score
+
+def eval_selection_aggregation_condition(gold: tuple[set, set], pred: tuple[set, set], k=6):
+    # partial match
+    final_score = derive_final_score(gold, pred)
+    gold_complexity = derive_complexity([len(gold[0]), len(gold[1])], k)
+    pred_complexity = derive_complexity([len(pred[0]), len(pred[1])], k)
+
+    return final_score, gold_complexity, pred_complexity
+
+def eval_nested(gold: int, pred: int, k=6):
+    if gold == 0 and pred == 0:  # gold is always true
+        final_score = 1.0
+    elif gold < pred:
+        final_score = 0.0
+    else:
+        final_score = np.round(min(gold, pred) / (max(gold, pred) + 1e-10), 6)
+    gold_complexity = derive_complexity([gold], k)
+    pred_complexity = derive_complexity([pred], k)
+    return final_score, gold_complexity, pred_complexity
+
+def eval_others(gold: dict[str, set|bool], pred: dict[str, set|bool], k=6):
+    # partial match
+    gold_distinct = gold['distinct']
+    pred_distinct = pred['distinct']
+    gold_orderby = gold['order by']
+    pred_orderby = pred['order by']
+    gold_limit = set([int(gold['limit'])])
+    pred_limit = set([int(pred['limit'])])
+    
+    final_score = derive_final_score(
+        [gold_distinct, gold_orderby, gold_limit], 
+        [pred_distinct, pred_orderby, pred_limit], 
+    )
+    gold_complexity = derive_complexity([len(gold_distinct), len(gold_orderby), len(gold_limit)], k)
+    pred_complexity = derive_complexity([len(pred_distinct), len(pred_orderby), len(pred_limit)], k)
+
+    return final_score, gold_complexity, pred_complexity
+    
+def eval_all(x, k=6):
+    selection_score, selecton_gold_complexity, selection_pred_complexity = \
+        eval_selection_aggregation_condition(x['gold_selection'], x['pred_selection'], k)
+    condition_score, condition_gold_complexity, condition_pred_complexity = \
+        eval_selection_aggregation_condition(x['gold_condition'], x['pred_condition'], k)
+    aggregation_score, aggregation_gold_complexity, aggregation_pred_complexity = \
+        eval_selection_aggregation_condition(x['gold_aggregation'], x['pred_aggregation'], k)
+    nested_score, nested_gold_complexity, nested_pred_complexity = \
+        eval_nested(x['gold_nested'], x['pred_nested'], k)
+    others_score, others_gold_complexity, others_pred_complexity = \
+        eval_others(x['gold_others'], x['pred_others'], k)
+    
+    results = {
+        'score': {
+            'selection': selection_score,
+            'condition': condition_score,
+            'aggregation': aggregation_score,
+            'nested': nested_score,
+            'others': others_score
+        },
+        'complexity': {
+            'selection': [selecton_gold_complexity, selection_pred_complexity],
+            'condition': [condition_gold_complexity, condition_pred_complexity],
+            'aggregation': [aggregation_gold_complexity, aggregation_pred_complexity],
+            'nested': [nested_gold_complexity, nested_pred_complexity],
+            'others': [others_gold_complexity, others_pred_complexity]
+        }
+    }
+    return results
+
+def eval_all_dataset(data_plus: list[dict]):
+    eval_results = []
+    for x in tqdm(data_plus):
+        results = eval_all(x)
+        gold_c = np.mean([x[0] for x in results['complexity'].values()])
+        pred_c = np.mean([x[1] for x in results['complexity'].values()])
+        new_x = {
+            'sample_id': x['sample_id'],
+            'db_id': x['db_id'],
+            'score': x['score'],
+            'question': x['question'],
+            'gold_sql': x['gold_sql'],
+            'pred_sql': x['pred_sql'],
+            'source_tables': x['source_tables'],
+            'len_tbls': len(x['source_tables']),
+            's_sel': results['score']['selection'],
+            's_cond': results['score']['condition'],
+            's_agg': results['score']['aggregation'],
+            's_nest': results['score']['nested'],
+            's_oth': results['score']['others'],
+            'gold_c_sel': results['complexity']['selection'][0],
+            'gold_c_cond': results['complexity']['condition'][0],
+            'gold_c_agg': results['complexity']['aggregation'][0],
+            'gold_c_nest': results['complexity']['nested'][0],
+            'gold_c_oth': results['complexity']['others'][0],
+            'pred_c_sel': results['complexity']['selection'][1],
+            'pred_c_cond': results['complexity']['condition'][1],
+            'pred_c_agg': results['complexity']['aggregation'][1],
+            'pred_c_nest': results['complexity']['nested'][1],
+            'pred_c_oth': results['complexity']['others'][1],
+            'gold_c': gold_c,
+            'pred_c': pred_c
+        }
+        eval_results.append(new_x)
+
+    df = pd.DataFrame(eval_results)
+    return df
 
 def get_output_result_plus(output_result, filename: str):
     output_results_plus = []
