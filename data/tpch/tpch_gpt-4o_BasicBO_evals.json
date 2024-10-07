@@ -1,0 +1,499 @@
+[
+    {
+        "sample_id": "q11",
+        "db_id": "tpch",
+        "gold_sql": "select l_returnflag, l_linestatus, sum(l_quantity) as sum_qty, sum(l_extendedprice) as sum_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order from lineitem where l_shipdate <= date((select max(l_shipdate) from lineitem), '-60 days') group by l_returnflag, l_linestatus order by l_returnflag, l_linestatus;",
+        "pred_sql": "SELECT     L_RETURNFLAG,     L_LINESTATUS,     SUM(L_QUANTITY) AS sum_qty,     SUM(L_EXTENDEDPRICE) AS sum_base_price,     SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS sum_disc_price,     SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT) * (1 + L_TAX)) AS sum_charge,     AVG(L_QUANTITY) AS avg_qty,     AVG(L_EXTENDEDPRICE) AS avg_price,     AVG(L_DISCOUNT) AS avg_disc,     COUNT(*) AS count_order FROM     LINEITEM WHERE     L_SHIPDATE < (         SELECT DATE(MAX(L_SHIPDATE), '-60 days')         FROM LINEITEM     ) GROUP BY     L_RETURNFLAG,     L_LINESTATUS ORDER BY     L_RETURNFLAG,     L_LINESTATUS;",
+        "score": 0
+    },
+    {
+        "sample_id": "q12",
+        "db_id": "tpch",
+        "gold_sql": "select l_returnflag, l_linestatus, sum(l_extendedprice) as sum_price, sum(l_extendedprice * (1 - l_discount)) as sum_disc_price, sum(l_extendedprice * (1 - l_discount) * (1 + l_tax)) as sum_charge, count(*) as count_order from lineitem where l_shipdate <= date((select max(l_shipdate) from lineitem), '-3 months') group by l_returnflag, l_linestatus order by l_returnflag, l_linestatus;",
+        "pred_sql": "SELECT      L.l_returnflag,      L.l_linestatus,      SUM(L.l_extendedprice) AS total_extended_price,      SUM(L.l_extendedprice * (1 - L.l_discount)) AS total_discounted_price,      SUM(L.l_extendedprice * (1 - L.l_discount) * (1 + L.l_tax)) AS total_discounted_price_plus_tax FROM      LINEITEM L WHERE      L.l_shipdate < DATE((SELECT MAX(l_shipdate) FROM LINEITEM), '-3 months') GROUP BY      L.l_returnflag,      L.l_linestatus ORDER BY      L.l_returnflag,      L.l_linestatus;",
+        "score": 0
+    },
+    {
+        "sample_id": "q13",
+        "db_id": "tpch",
+        "gold_sql": "select l_returnflag, l_linestatus, avg(l_quantity) as avg_qty, avg(l_extendedprice) as avg_price, avg(l_discount) as avg_disc, count(*) as count_order from lineitem where l_shipdate <= date((select max(l_shipdate) from lineitem), '-3 months') group by l_returnflag, l_linestatus order by l_returnflag, l_linestatus;",
+        "pred_sql": "SELECT      L_RETURNFLAG,      L_LINESTATUS,      AVG(L_QUANTITY) AS AVG_QTY,      AVG(L_EXTENDEDPRICE) AS AVG_EXTENDEDPRICE,      AVG(L_DISCOUNT) AS AVG_DISCOUNT FROM      LINEITEM WHERE      L_SHIPDATE < DATE((SELECT MAX(L_SHIPDATE) FROM LINEITEM), '-3 months') GROUP BY      L_RETURNFLAG,      L_LINESTATUS ORDER BY      L_RETURNFLAG,      L_LINESTATUS;",
+        "score": 0
+    },
+    {
+        "sample_id": "q21",
+        "db_id": "tpch",
+        "gold_sql": "select s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment from part, supplier, partsupp, nation, region where p_partkey = ps_partkey and s_suppkey = ps_suppkey and p_size = 42 and p_type like '%COPPER%' and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'EUROPE' and ps_supplycost = (  select  min(ps_supplycost)  from  partsupp,  supplier,  nation,  region  where  p_partkey = ps_partkey  and s_suppkey = ps_suppkey  and s_nationkey = n_nationkey  and n_regionkey = r_regionkey  and r_name = 'EUROPE' ) order by s_acctbal desc, n_name, s_name, p_partkey LIMIT 100; ",
+        "pred_sql": "SELECT T2.S_ACCTBAL, T2.S_NAME, T4.N_NAME, T1.P_PARTKEY, T1.P_MFGR, T2.S_ADDRESS, T2.S_PHONE, T2.S_COMMENT FROM PART T1 JOIN PARTSUPP T3 ON T1.P_PARTKEY = T3.PS_PARTKEY JOIN SUPPLIER T2 ON T3.PS_SUPPKEY = T2.S_SUPPKEY JOIN NATION T4 ON T2.S_NATIONKEY = T4.N_NATIONKEY JOIN REGION T5 ON T4.N_REGIONKEY = T5.R_REGIONKEY JOIN (     SELECT PS_PARTKEY, MIN(PS_SUPPLYCOST) AS MIN_PS_SUPPLYCOST     FROM PARTSUPP     JOIN SUPPLIER ON PS_SUPPKEY = S_SUPPKEY     JOIN NATION ON S_NATIONKEY = N_NATIONKEY     JOIN REGION ON N_REGIONKEY = R_REGIONKEY     WHERE R_NAME = 'EUROPE'     GROUP BY PS_PARTKEY ) AS MIN_COST ON T3.PS_PARTKEY = MIN_COST.PS_PARTKEY AND T3.PS_SUPPLYCOST = MIN_COST.MIN_PS_SUPPLYCOST WHERE T1.P_TYPE LIKE '%COPPER%'   AND T1.P_SIZE = 42 ORDER BY T2.S_ACCTBAL DESC LIMIT 100;",
+        "score": 1
+    },
+    {
+        "sample_id": "q22",
+        "db_id": "tpch",
+        "gold_sql": "select s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment from part, supplier, partsupp, nation, region where p_partkey = ps_partkey and s_suppkey = ps_suppkey and p_size = 20 and p_type like '%BRASS%' and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'AMERICA' and ps_supplycost = (  select  min(ps_supplycost)  from  partsupp,  supplier,  nation,  region  where  p_partkey = ps_partkey  and s_suppkey = ps_suppkey  and s_nationkey = n_nationkey  and n_regionkey = r_regionkey  and r_name = 'AMERICA' ) order by s_acctbal desc, n_name, s_name, p_partkey LIMIT 100; ",
+        "pred_sql": "SELECT T2.S_ACCTBAL, T2.S_NAME, T4.N_NAME, T1.P_PARTKEY, T1.P_MFGR, T2.S_ADDRESS, T2.S_PHONE, T2.S_COMMENT FROM PART T1 JOIN PARTSUPP T3 ON T1.P_PARTKEY = T3.PS_PARTKEY JOIN SUPPLIER T2 ON T3.PS_SUPPKEY = T2.S_SUPPKEY JOIN NATION T4 ON T2.S_NATIONKEY = T4.N_NATIONKEY JOIN REGION T5 ON T4.N_REGIONKEY = T5.R_REGIONKEY WHERE T1.P_TYPE LIKE '%BRASS%'   AND T1.P_SIZE = 20   AND T5.R_NAME = 'AMERICA' ORDER BY T3.PS_SUPPLYCOST ASC LIMIT 100;",
+        "score": 0
+    },
+    {
+        "sample_id": "q23",
+        "db_id": "tpch",
+        "gold_sql": "select s_acctbal, s_name, n_name, p_partkey, p_mfgr, s_address, s_phone, s_comment from part, supplier, partsupp, nation, region where p_partkey = ps_partkey and s_suppkey = ps_suppkey and p_size = 15 and p_type like '%TIN%' and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'ASIA' and ps_supplycost = (  select  min(ps_supplycost)  from  partsupp,  supplier,  nation,  region  where  p_partkey = ps_partkey  and s_suppkey = ps_suppkey  and s_nationkey = n_nationkey  and n_regionkey = r_regionkey  and r_name = 'ASIA' ) order by s_acctbal desc, n_name, s_name, p_partkey LIMIT 100; ",
+        "pred_sql": "SELECT T2.S_ACCTBAL, T2.S_NAME, T3.N_NAME, T1.P_PARTKEY, T1.P_MFGR, T2.S_ADDRESS, T2.S_PHONE, T2.S_COMMENT FROM PART T1 JOIN PARTSUPP T4 ON T1.P_PARTKEY = T4.PS_PARTKEY JOIN SUPPLIER T2 ON T4.PS_SUPPKEY = T2.S_SUPPKEY JOIN NATION T3 ON T2.S_NATIONKEY = T3.N_NATIONKEY JOIN REGION T5 ON T3.N_REGIONKEY = T5.R_REGIONKEY JOIN (     SELECT PS_PARTKEY, MIN(PS_SUPPLYCOST) AS MIN_PS_SUPPLYCOST     FROM PARTSUPP     JOIN SUPPLIER ON PS_SUPPKEY = S_SUPPKEY     JOIN NATION ON S_NATIONKEY = N_NATIONKEY     JOIN REGION ON N_REGIONKEY = R_REGIONKEY     WHERE R_NAME = 'ASIA'     GROUP BY PS_PARTKEY ) AS MIN_COST ON T4.PS_PARTKEY = MIN_COST.PS_PARTKEY AND T4.PS_SUPPLYCOST = MIN_COST.MIN_PS_SUPPLYCOST WHERE T1.P_NAME LIKE '%TIN%' AND T1.P_SIZE = 15 AND T5.R_NAME = 'ASIA' ORDER BY T2.S_ACCTBAL DESC LIMIT 100;",
+        "score": 0
+    },
+    {
+        "sample_id": "q31",
+        "db_id": "tpch",
+        "gold_sql": "select l_orderkey, sum(l_extendedprice * (1 - l_discount)) as revenue, o_orderdate, o_shippriority from customer, orders, lineitem where c_mktsegment = 'HOUSEHOLD' and c_custkey = o_custkey and l_orderkey = o_orderkey and o_orderdate < '1995-03-20' and l_shipdate > '1995-03-20' group by l_orderkey, o_orderdate, o_shippriority order by revenue desc, o_orderdate LIMIT 10;",
+        "pred_sql": "SELECT T2.o_orderkey, T2.o_orderdate, T2.o_shippriority, SUM(T3.l_extendedprice * (1 - T3.l_discount)) AS revenue FROM CUSTOMER T1 JOIN ORDERS T2 ON T1.c_custkey = T2.o_custkey JOIN LINEITEM T3 ON T2.o_orderkey = T3.l_orderkey WHERE T2.o_orderdate < '1995-03-20'   AND T3.l_shipdate > '1995-03-20'   AND T1.c_mktsegment = 'HOUSEHOLD' GROUP BY T2.o_orderkey, T2.o_orderdate, T2.o_shippriority ORDER BY revenue DESC, T2.o_orderdate LIMIT 10;",
+        "score": 1
+    },
+    {
+        "sample_id": "q32",
+        "db_id": "tpch",
+        "gold_sql": "select l_orderkey, sum(l_extendedprice * (1 - l_discount)) as revenue, o_orderdate, o_shippriority from customer, orders, lineitem where c_mktsegment = 'AUTOMOBILE' and c_custkey = o_custkey and l_orderkey = o_orderkey and o_orderdate < '1995-03-30' and l_shipdate > '1995-03-30' group by l_orderkey, o_orderdate, o_shippriority order by revenue desc, o_orderdate LIMIT 10;",
+        "pred_sql": "SELECT T2.O_ORDERKEY, T2.O_ORDERDATE, T2.O_SHIPPRIORITY FROM CUSTOMER T1 JOIN ORDERS T2 ON T1.C_CUSTKEY = T2.O_CUSTKEY JOIN LINEITEM T3 ON T2.O_ORDERKEY = T3.L_ORDERKEY WHERE T1.C_MKTSEGMENT = 'AUTOMOBILE'   AND T2.O_ORDERDATE < '1995-03-30'   AND T3.L_SHIPDATE > '1995-03-30' GROUP BY T2.O_ORDERKEY, T2.O_ORDERDATE, T2.O_SHIPPRIORITY ORDER BY SUM(T3.L_EXTENDEDPRICE * (1 - T3.L_DISCOUNT)) DESC LIMIT 10;",
+        "score": 0
+    },
+    {
+        "sample_id": "q33",
+        "db_id": "tpch",
+        "gold_sql": "select l_orderkey, sum(l_extendedprice * (1 - l_discount)) as revenue, o_orderdate, o_shippriority from customer, orders, lineitem where c_mktsegment = 'BUILDING' and c_custkey = o_custkey and l_orderkey = o_orderkey and o_orderdate < '1995-03-01' and l_shipdate > '1995-03-01' group by l_orderkey, o_orderdate, o_shippriority order by revenue desc, o_orderdate LIMIT 10;",
+        "pred_sql": "SELECT T2.O_ORDERKEY, T2.O_ORDERDATE, T2.O_SHIPPRIORITY FROM CUSTOMER T1 JOIN ORDERS T2 ON T1.C_CUSTKEY = T2.O_CUSTKEY JOIN LINEITEM T3 ON T2.O_ORDERKEY = T3.L_ORDERKEY WHERE T2.O_ORDERDATE < '1995-03-01'   AND T3.L_SHIPDATE > '1995-03-01'   AND T1.C_MKTSEGMENT = 'BUILDING' GROUP BY T2.O_ORDERKEY, T2.O_ORDERDATE, T2.O_SHIPPRIORITY ORDER BY SUM(T3.L_EXTENDEDPRICE * (1 - T3.L_DISCOUNT)) DESC LIMIT 10;",
+        "score": 0
+    },
+    {
+        "sample_id": "q41",
+        "db_id": "tpch",
+        "gold_sql": "select o_orderpriority, count(*) as order_count from orders where o_orderdate >= '1993-01-01' and o_orderdate < date('1993-01-01', '+3 months') and exists (  select  *  from  lineitem  where  l_orderkey = o_orderkey  and l_commitdate < l_receiptdate ) group by o_orderpriority order by o_orderpriority;",
+        "pred_sql": "SELECT O_ORDERPRIORITY, COUNT(*) AS order_count FROM ORDERS AS T1 WHERE O_ORDERDATE >= '1993-01-01' AND O_ORDERDATE <= '1993-03-31' AND EXISTS (     SELECT 1     FROM LINEITEM AS T2     WHERE T2.L_ORDERKEY = T1.O_ORDERKEY     AND T2.L_COMMITDATE < T2.L_RECEIPTDATE ) GROUP BY O_ORDERPRIORITY ORDER BY O_ORDERPRIORITY ASC;",
+        "score": 1
+    },
+    {
+        "sample_id": "q42",
+        "db_id": "tpch",
+        "gold_sql": "select o_orderpriority, count(*) as order_count from orders where o_orderdate >= '1993-07-01' and o_orderdate < date('1993-07-01', '+3 months') and exists (  select  *  from  lineitem  where  l_orderkey = o_orderkey  and l_commitdate < l_receiptdate ) group by o_orderpriority order by o_orderpriority;",
+        "pred_sql": "SELECT O.O_ORDERPRIORITY, COUNT(DISTINCT O.O_ORDERKEY) AS order_count FROM ORDERS O JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY WHERE O.O_ORDERDATE >= '1993-07-01' AND O.O_ORDERDATE <= '1993-09-30' AND L.L_COMMITDATE < L.L_RECEIPTDATE GROUP BY O.O_ORDERPRIORITY ORDER BY O.O_ORDERPRIORITY ASC;",
+        "score": 1
+    },
+    {
+        "sample_id": "q43",
+        "db_id": "tpch",
+        "gold_sql": "select o_orderpriority, count(*) as order_count from orders where o_orderdate >= '1993-04-01' and o_orderdate < date('1993-04-01', '+3 months') and exists (  select  *  from  lineitem  where  l_orderkey = o_orderkey  and l_commitdate < l_receiptdate ) group by o_orderpriority order by o_orderpriority;",
+        "pred_sql": "SELECT O.O_ORDERPRIORITY, COUNT(*) AS order_count FROM ORDERS O WHERE O.O_ORDERDATE >= '1993-04-01'   AND O.O_ORDERDATE <= '1993-06-30'   AND EXISTS (     SELECT 1     FROM LINEITEM L     WHERE L.L_ORDERKEY = O.O_ORDERKEY       AND L.L_COMMITDATE < L.L_RECEIPTDATE   ) GROUP BY O.O_ORDERPRIORITY ORDER BY O.O_ORDERPRIORITY ASC;",
+        "score": 1
+    },
+    {
+        "sample_id": "q51",
+        "db_id": "tpch",
+        "gold_sql": "select n_name, sum(l_extendedprice * (1 - l_discount)) as revenue from customer, orders, lineitem, supplier, nation, region where c_custkey = o_custkey and l_orderkey = o_orderkey and l_suppkey = s_suppkey and c_nationkey = s_nationkey and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'EUROPE' and o_orderdate >= '1993-01-01' and o_orderdate < '1994-01-01' group by n_name order by revenue desc;",
+        "pred_sql": "SELECT N.N_NAME, SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS REVENUE FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY JOIN SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN NATION N ON C.C_NATIONKEY = S.S_NATIONKEY AND S.S_NATIONKEY = N.N_NATIONKEY JOIN REGION R ON N.N_REGIONKEY = R.R_REGIONKEY WHERE R.R_NAME = 'EUROPE' AND O.O_ORDERDATE BETWEEN '1993-01-01' AND '1993-12-31' GROUP BY N.N_NAME ORDER BY REVENUE DESC;",
+        "score": 1
+    },
+    {
+        "sample_id": "q52",
+        "db_id": "tpch",
+        "gold_sql": "select n_name, sum(l_extendedprice * (1 - l_discount)) as revenue from customer, orders, lineitem, supplier, nation, region where c_custkey = o_custkey and l_orderkey = o_orderkey and l_suppkey = s_suppkey and c_nationkey = s_nationkey and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'ASIA' and o_orderdate >= '1995-01-01' and o_orderdate < '1996-01-01' group by n_name order by revenue desc;",
+        "pred_sql": "SELECT T5.N_NAME, SUM(T3.L_EXTENDEDPRICE * (1 - T3.L_DISCOUNT)) AS revenue FROM CUSTOMER T1 JOIN ORDERS T2 ON T1.C_CUSTKEY = T2.O_CUSTKEY JOIN LINEITEM T3 ON T2.O_ORDERKEY = T3.L_ORDERKEY JOIN SUPPLIER T4 ON T3.L_SUPPKEY = T4.S_SUPPKEY JOIN NATION T5 ON T1.C_NATIONKEY = T5.N_NATIONKEY AND T4.S_NATIONKEY = T5.N_NATIONKEY JOIN REGION T6 ON T5.N_REGIONKEY = T6.R_REGIONKEY WHERE T6.R_NAME = 'ASIA' AND strftime('%Y', T2.O_ORDERDATE) = '1995' GROUP BY T5.N_NAME ORDER BY revenue DESC;",
+        "score": 1
+    },
+    {
+        "sample_id": "q53",
+        "db_id": "tpch",
+        "gold_sql": "select n_name, sum(l_extendedprice * (1 - l_discount)) as revenue from customer, orders, lineitem, supplier, nation, region where c_custkey = o_custkey and l_orderkey = o_orderkey and l_suppkey = s_suppkey and c_nationkey = s_nationkey and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'AMERICA' and o_orderdate >= '1997-01-01' and o_orderdate < '1998-01-01' group by n_name order by revenue desc;",
+        "pred_sql": "SELECT N.N_NAME, SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS revenue FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY JOIN SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN NATION N ON S.S_NATIONKEY = N.N_NATIONKEY JOIN REGION R ON N.N_REGIONKEY = R.R_REGIONKEY WHERE R.R_NAME = 'AMERICA' AND O.O_ORDERDATE BETWEEN '1997-01-01' AND '1997-12-31' GROUP BY N.N_NAME ORDER BY revenue DESC;",
+        "score": 0
+    },
+    {
+        "sample_id": "q54",
+        "db_id": "tpch",
+        "gold_sql": "select n_name, sum(l_extendedprice * (1 - l_discount)) as revenue from customer, orders, lineitem, supplier, nation, region where c_custkey = o_custkey and l_orderkey = o_orderkey and l_suppkey = s_suppkey and c_nationkey = s_nationkey and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'EUROPE' and o_orderdate >= '1993-01-01' and o_orderdate < '1994-01-01' group by n_name order by revenue desc;",
+        "pred_sql": "SELECT N.N_NAME, SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS REVENUE FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY JOIN SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN NATION N ON C.C_NATIONKEY = S.S_NATIONKEY AND S.S_NATIONKEY = N.N_NATIONKEY JOIN REGION R ON N.N_REGIONKEY = R.R_REGIONKEY WHERE R.R_NAME = 'EUROPE' AND strftime('%Y', O.O_ORDERDATE) = '1993' GROUP BY N.N_NAME ORDER BY REVENUE DESC;",
+        "score": 1
+    },
+    {
+        "sample_id": "q55",
+        "db_id": "tpch",
+        "gold_sql": "select n_name, sum(l_extendedprice * (1 - l_discount)) as revenue from customer, orders, lineitem, supplier, nation, region where c_custkey = o_custkey and l_orderkey = o_orderkey and l_suppkey = s_suppkey and c_nationkey = s_nationkey and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'ASIA' and o_orderdate >= '1995-01-01' and o_orderdate < '1996-01-01' group by n_name order by revenue desc;",
+        "pred_sql": "SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue FROM CUSTOMER c JOIN ORDERS o ON c.c_custkey = o.o_custkey JOIN LINEITEM l ON o.o_orderkey = l.l_orderkey JOIN SUPPLIER s ON l.l_suppkey = s.s_suppkey JOIN NATION n ON c.c_nationkey = n.n_nationkey AND s.s_nationkey = n.n_nationkey JOIN REGION r ON n.n_regionkey = r.r_regionkey WHERE r.r_name = 'ASIA' AND strftime('%Y', o.o_orderdate) = '1995' GROUP BY n.n_name ORDER BY revenue DESC;",
+        "score": 1
+    },
+    {
+        "sample_id": "q56",
+        "db_id": "tpch",
+        "gold_sql": "select n_name, sum(l_extendedprice * (1 - l_discount)) as revenue from customer, orders, lineitem, supplier, nation, region where c_custkey = o_custkey and l_orderkey = o_orderkey and l_suppkey = s_suppkey and c_nationkey = s_nationkey and s_nationkey = n_nationkey and n_regionkey = r_regionkey and r_name = 'AMERICA' and o_orderdate >= '1997-01-01' and o_orderdate < '1998-01-01' group by n_name order by revenue desc;",
+        "pred_sql": "SELECT n.n_name, SUM(l.l_extendedprice * (1 - l.l_discount)) AS revenue FROM CUSTOMER c JOIN ORDERS o ON c.c_custkey = o.o_custkey JOIN LINEITEM l ON o.o_orderkey = l.l_orderkey JOIN SUPPLIER s ON l.l_suppkey = s.s_suppkey JOIN NATION n ON c.c_nationkey = n.n_nationkey AND s.s_nationkey = n.n_nationkey JOIN REGION r ON n.n_regionkey = r.r_regionkey WHERE r.r_name = 'AMERICA' AND strftime('%Y', o.o_orderdate) = '1997' GROUP BY n.n_name ORDER BY revenue DESC;",
+        "score": 1
+    },
+    {
+        "sample_id": "q61",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice * l_discount) as revenue from lineitem where l_shipdate >= '1993-01-01' and l_shipdate < '1994-01-01' and l_discount between 0.01 and 0.03 and l_quantity < 24;",
+        "pred_sql": "SELECT SUM(L_EXTENDEDPRICE * L_DISCOUNT) AS revenue_increase FROM LINEITEM WHERE L_DISCOUNT BETWEEN 0.01 AND 0.03 AND L_QUANTITY < 24 AND strftime('%Y', L_SHIPDATE) = '1993';",
+        "score": 1
+    },
+    {
+        "sample_id": "q62",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice * l_discount) as revenue from lineitem where l_shipdate >= '1995-01-01' and l_shipdate < '1996-01-01' and l_discount between 0.05 and 0.07 and l_quantity < 25;",
+        "pred_sql": "SELECT SUM(l_extendedprice * l_discount) AS revenue FROM LINEITEM WHERE l_discount BETWEEN 0.05 AND 0.07 AND l_quantity < 25 AND strftime('%Y', l_shipdate) = '1995';",
+        "score": 1
+    },
+    {
+        "sample_id": "q63",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice * l_discount) as revenue from lineitem where l_shipdate >= '1997-01-01' and l_shipdate < '1998-01-01' and l_discount between 0.08 and 0.10 and l_quantity < 24;",
+        "pred_sql": "SELECT SUM(L_EXTENDEDPRICE * L_DISCOUNT) AS revenue_increase FROM LINEITEM WHERE L_DISCOUNT BETWEEN 0.08 AND 0.10 AND L_QUANTITY < 24 AND strftime('%Y', L_SHIPDATE) = '1997';",
+        "score": 1
+    },
+    {
+        "sample_id": "q71",
+        "db_id": "tpch",
+        "gold_sql": "select supp_nation, cust_nation, l_year, sum(volume) as revenue from (  select  n1.n_name as supp_nation,  n2.n_name as cust_nation,  strftime('%Y', l_shipdate) as l_year,  l_extendedprice * (1 - l_discount) as volume  from  supplier,  lineitem,  orders,  customer,  nation n1,  nation n2  where  s_suppkey = l_suppkey  and o_orderkey = l_orderkey  and c_custkey = o_custkey  and s_nationkey = n1.n_nationkey  and c_nationkey = n2.n_nationkey  and (   (n1.n_name = 'ALGERIA' and n2.n_name = 'GERMANY')   or (n1.n_name = 'GERMANY' and n2.n_name = 'ALGERIA')  )  and l_shipdate between '1995-01-01' and '1996-12-31' ) as shipping group by supp_nation, cust_nation, l_year order by supp_nation, cust_nation, l_year;",
+        "pred_sql": "SELECT n1.n_name AS supp_nation, n2.n_name AS cust_nation, strftime('%Y', l_shipdate) AS year, SUM(l_extendedprice * (1 - l_discount)) AS volume FROM supplier AS s JOIN lineitem AS l ON s.s_suppkey = l.l_suppkey JOIN orders AS o ON o.o_orderkey = l.l_orderkey JOIN customer AS c ON c.c_custkey = o.o_custkey JOIN nation AS n1 ON s.s_nationkey = n1.n_nationkey JOIN nation AS n2 ON c.c_nationkey = n2.n_nationkey WHERE ((n1.n_name = 'ALGERIA' AND n2.n_name = 'GERMANY') OR (n1.n_name = 'GERMANY' AND n2.n_name = 'ALGERIA')) AND l_shipdate BETWEEN '1995-01-01' AND '1996-12-31' GROUP BY supp_nation, cust_nation, year ORDER BY supp_nation, cust_nation, year;",
+        "score": 1
+    },
+    {
+        "sample_id": "q72",
+        "db_id": "tpch",
+        "gold_sql": "select supp_nation, cust_nation, l_year, sum(volume) as revenue from (  select  n1.n_name as supp_nation,  n2.n_name as cust_nation,  strftime('%Y', l_shipdate) as l_year,  l_extendedprice * (1 - l_discount) as volume  from  supplier,  lineitem,  orders,  customer,  nation n1,  nation n2  where  s_suppkey = l_suppkey  and o_orderkey = l_orderkey  and c_custkey = o_custkey  and s_nationkey = n1.n_nationkey  and c_nationkey = n2.n_nationkey  and (   (n1.n_name = 'CANADA' and n2.n_name = 'UNITED STATES')   or (n1.n_name = 'UNITED STATES' and n2.n_name = 'CANADA')  )  and l_shipdate between '1995-01-01' and '1996-12-31' ) as shipping group by supp_nation, cust_nation, l_year order by supp_nation, cust_nation, l_year;",
+        "pred_sql": "SELECT n1.n_name AS supp_nation, n2.n_name AS cust_nation, strftime('%Y', l_shipdate) AS year, SUM(l_extendedprice * (1 - l_discount)) AS volume FROM supplier AS s JOIN lineitem AS l ON s.s_suppkey = l.l_suppkey JOIN orders AS o ON o.o_orderkey = l.l_orderkey JOIN customer AS c ON c.c_custkey = o.o_custkey JOIN nation AS n1 ON s.s_nationkey = n1.n_nationkey JOIN nation AS n2 ON c.c_nationkey = n2.n_nationkey WHERE ((n1.n_name = 'CANADA' AND n2.n_name = 'UNITED STATES') OR (n1.n_name = 'UNITED STATES' AND n2.n_name = 'CANADA')) AND l_shipdate BETWEEN '1995-01-01' AND '1996-12-31' GROUP BY supp_nation, cust_nation, year ORDER BY supp_nation, cust_nation, year;",
+        "score": 1
+    },
+    {
+        "sample_id": "q73",
+        "db_id": "tpch",
+        "gold_sql": "select supp_nation, cust_nation, l_year, sum(volume) as revenue from (  select  n1.n_name as supp_nation,  n2.n_name as cust_nation,  strftime('%Y', l_shipdate) as l_year,  l_extendedprice * (1 - l_discount) as volume  from  supplier,  lineitem,  orders,  customer,  nation n1,  nation n2  where  s_suppkey = l_suppkey  and o_orderkey = l_orderkey  and c_custkey = o_custkey  and s_nationkey = n1.n_nationkey  and c_nationkey = n2.n_nationkey  and (   (n1.n_name = 'FRANCE' and n2.n_name = 'INDONESIA')   or (n1.n_name = 'INDONESIA' and n2.n_name = 'FRANCE')  )  and l_shipdate between '1995-01-01' and '1996-12-31' ) as shipping group by supp_nation, cust_nation, l_year order by supp_nation, cust_nation, l_year;",
+        "pred_sql": "SELECT      n1.n_name AS supp_nation,      n2.n_name AS cust_nation,      strftime('%Y', l_shipdate) AS year,      SUM(l_extendedprice * (1 - l_discount)) AS volume FROM      supplier AS s JOIN      lineitem AS l ON s.s_suppkey = l.l_suppkey JOIN      orders AS o ON o.o_orderkey = l.l_orderkey JOIN      customer AS c ON c.c_custkey = o.o_custkey JOIN      nation AS n1 ON s.s_nationkey = n1.n_nationkey JOIN      nation AS n2 ON c.c_nationkey = n2.n_nationkey WHERE      ((n1.n_name = 'FRANCE' AND n2.n_name = 'INDONESIA') OR       (n1.n_name = 'INDONESIA' AND n2.n_name = 'FRANCE'))     AND l_shipdate BETWEEN '1995-01-01' AND '1996-12-31' GROUP BY      supp_nation, cust_nation, year ORDER BY      supp_nation, cust_nation, year;",
+        "score": 1
+    },
+    {
+        "sample_id": "q81",
+        "db_id": "tpch",
+        "gold_sql": "select o_year, sum(case  when nation = 'INDONESIA' then volume  else 0 end) / sum(volume) as mkt_share from (  select  strftime('%Y', o_orderdate) as o_year,  l_extendedprice * (1 - l_discount) as volume,  n2.n_name as nation  from  part,  supplier,  lineitem,  orders,  customer,  nation n1,  nation n2,  region  where  p_partkey = l_partkey  and s_suppkey = l_suppkey  and l_orderkey = o_orderkey  and o_custkey = c_custkey  and c_nationkey = n1.n_nationkey  and n1.n_regionkey = r_regionkey  and r_name = 'ASIA'  and s_nationkey = n2.n_nationkey  and o_orderdate between '1995-01-01' and '1996-12-31'  and p_type = 'ECONOMY ANODIZED STEEL' ) as all_nations group by o_year order by o_year;",
+        "pred_sql": "SELECT strftime('%Y', O_ORDERDATE) AS year,         100.0 * SUM(CASE WHEN N.N_NAME = 'INDONESIA' THEN L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT) ELSE 0 END) / SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS market_share FROM LINEITEM L JOIN ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY JOIN PARTSUPP PS ON L.L_PARTKEY = PS.PS_PARTKEY AND L.L_SUPPKEY = PS.PS_SUPPKEY JOIN SUPPLIER S ON PS.PS_SUPPKEY = S.S_SUPPKEY JOIN NATION N ON S.S_NATIONKEY = N.N_NATIONKEY JOIN REGION R ON N.N_REGIONKEY = R.R_REGIONKEY WHERE R.R_NAME = 'ASIA'    AND P.P_TYPE = 'ECONOMY ANODIZED STEEL'   AND strftime('%Y', O.O_ORDERDATE) IN ('1995', '1996') GROUP BY year ORDER BY year;",
+        "score": 0
+    },
+    {
+        "sample_id": "q82",
+        "db_id": "tpch",
+        "gold_sql": "select o_year, sum(case  when nation = 'BRAZIL' then volume  else 0 end) / sum(volume) as mkt_share from (  select  strftime('%Y', o_orderdate) as o_year,  l_extendedprice * (1 - l_discount) as volume,  n2.n_name as nation  from  part,  supplier,  lineitem,  orders,  customer,  nation n1,  nation n2,  region  where  p_partkey = l_partkey  and s_suppkey = l_suppkey  and l_orderkey = o_orderkey  and o_custkey = c_custkey  and c_nationkey = n1.n_nationkey  and n1.n_regionkey = r_regionkey  and r_name = 'AMERICA'  and s_nationkey = n2.n_nationkey  and o_orderdate between '1995-01-01' and '1996-12-31'  and p_type = 'LARGE POLISHED COPPER' ) as all_nations group by o_year order by o_year;",
+        "pred_sql": "SELECT strftime('%Y', L_SHIPDATE) AS year, SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS revenue FROM CUSTOMER AS T1 JOIN ORDERS AS T2 ON T1.C_CUSTKEY = T2.O_CUSTKEY JOIN LINEITEM AS T3 ON T2.O_ORDERKEY = T3.L_ORDERKEY JOIN SUPPLIER AS T4 ON T3.L_SUPPKEY = T4.S_SUPPKEY JOIN NATION AS T5 ON T1.C_NATIONKEY = T5.N_NATIONKEY AND T4.S_NATIONKEY = T5.N_NATIONKEY JOIN REGION AS T6 ON T5.N_REGIONKEY = T6.R_REGIONKEY JOIN PART AS T7 ON T3.L_PARTKEY = T7.P_PARTKEY WHERE T6.R_NAME = 'AMERICA'   AND T5.N_NAME = 'BRAZIL'   AND T7.P_TYPE = 'LARGE POLISHED COPPER'   AND strftime('%Y', T3.L_SHIPDATE) IN ('1995', '1996') GROUP BY year ORDER BY year;",
+        "score": 0
+    },
+    {
+        "sample_id": "q83",
+        "db_id": "tpch",
+        "gold_sql": "select o_year, sum(case  when nation = 'FRANCE' then volume  else 0 end) / sum(volume) as mkt_share from (  select  strftime('%Y', o_orderdate) as o_year,  l_extendedprice * (1 - l_discount) as volume,  n2.n_name as nation  from  part,  supplier,  lineitem,  orders,  customer,  nation n1,  nation n2,  region  where  p_partkey = l_partkey  and s_suppkey = l_suppkey  and l_orderkey = o_orderkey  and o_custkey = c_custkey  and c_nationkey = n1.n_nationkey  and n1.n_regionkey = r_regionkey  and r_name = 'EUROPE'  and s_nationkey = n2.n_nationkey  and o_orderdate between '1995-01-01' and '1996-12-31'  and p_type = 'STANDARD PLATED TIN' ) as all_nations group by o_year order by o_year;",
+        "pred_sql": "SELECT      100.0 * SUM(CASE WHEN N.N_NAME = 'FRANCE' THEN L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT) ELSE 0 END) / SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS market_share_france FROM      LINEITEM L JOIN      ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY JOIN      PART P ON L.L_PARTKEY = P.P_PARTKEY JOIN      SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN      NATION N ON S.S_NATIONKEY = N.N_NATIONKEY JOIN      REGION R ON N.N_REGIONKEY = R.R_REGIONKEY WHERE      R.R_NAME = 'EUROPE'      AND P.P_TYPE = 'STANDARD PLATED TIN'     AND O.O_ORDERDATE BETWEEN '1995-01-01' AND '1996-12-31'",
+        "score": 0
+    },
+    {
+        "sample_id": "q84",
+        "db_id": "tpch",
+        "gold_sql": "select o_year, sum(case  when nation = 'INDONESIA' then volume  else 0 end) / sum(volume) as mkt_share from (  select  strftime('%Y', o_orderdate) as o_year,  l_extendedprice * (1 - l_discount) as volume,  n2.n_name as nation  from  part,  supplier,  lineitem,  orders,  customer,  nation n1,  nation n2,  region  where  p_partkey = l_partkey  and s_suppkey = l_suppkey  and l_orderkey = o_orderkey  and o_custkey = c_custkey  and c_nationkey = n1.n_nationkey  and n1.n_regionkey = r_regionkey  and r_name = 'ASIA'  and s_nationkey = n2.n_nationkey  and o_orderdate between '1995-01-01' and '1996-12-31'  and p_type = 'ECONOMY ANODIZED STEEL' ) as all_nations group by o_year order by o_year;",
+        "pred_sql": "SELECT strftime('%Y', O_ORDERDATE) AS year, SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS revenue FROM CUSTOMER AS T1 JOIN ORDERS AS T2 ON T1.C_CUSTKEY = T2.O_CUSTKEY JOIN LINEITEM AS T3 ON T2.O_ORDERKEY = T3.L_ORDERKEY JOIN SUPPLIER AS T4 ON T3.L_SUPPKEY = T4.S_SUPPKEY JOIN NATION AS T5 ON T1.C_NATIONKEY = T5.N_NATIONKEY AND T4.S_NATIONKEY = T5.N_NATIONKEY JOIN REGION AS T6 ON T5.N_REGIONKEY = T6.R_REGIONKEY JOIN PART AS T7 ON T3.L_PARTKEY = T7.P_PARTKEY WHERE T6.R_NAME = 'ASIA'   AND T5.N_NAME = 'INDONESIA'   AND T7.P_TYPE = 'ECONOMY ANODIZED STEEL'   AND strftime('%Y', T2.O_ORDERDATE) IN ('1995', '1996') GROUP BY year ORDER BY year;",
+        "score": 0
+    },
+    {
+        "sample_id": "q91",
+        "db_id": "tpch",
+        "gold_sql": "select nation, o_year, sum(amount) as sum_profit from (  select  n_name as nation,  strftime('%Y', o_orderdate) as o_year,  l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount  from  part,  supplier,  lineitem,  partsupp,  orders,  nation  where  s_suppkey = l_suppkey  and ps_suppkey = l_suppkey  and ps_partkey = l_partkey  and p_partkey = l_partkey  and o_orderkey = l_orderkey  and s_nationkey = n_nationkey  and p_name like '%antique%' ) as profit group by nation, o_year order by nation, o_year desc;",
+        "pred_sql": "SELECT      N.N_NAME AS nation,      strftime('%Y', O.O_ORDERDATE) AS year,      SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT) - PS.PS_SUPPLYCOST * L.L_QUANTITY) AS profit FROM      PART P JOIN      LINEITEM L ON P.P_PARTKEY = L.L_PARTKEY JOIN      PARTSUPP PS ON L.L_PARTKEY = PS.PS_PARTKEY AND L.L_SUPPKEY = PS.PS_SUPPKEY JOIN      SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN      NATION N ON S.S_NATIONKEY = N.N_NATIONKEY JOIN      ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY WHERE      P.P_NAME LIKE '%antique%' GROUP BY      nation, year ORDER BY      year DESC;",
+        "score": 0
+    },
+    {
+        "sample_id": "q92",
+        "db_id": "tpch",
+        "gold_sql": "select nation, o_year, sum(amount) as sum_profit from (  select  n_name as nation,  strftime('%Y', o_orderdate) as o_year,  l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount  from  part,  supplier,  lineitem,  partsupp,  orders,  nation  where  s_suppkey = l_suppkey  and ps_suppkey = l_suppkey  and ps_partkey = l_partkey  and p_partkey = l_partkey  and o_orderkey = l_orderkey  and s_nationkey = n_nationkey  and p_name like '%green%' ) as profit group by nation, o_year order by nation, o_year desc;",
+        "pred_sql": "SELECT      N.N_NAME AS nation,      strftime('%Y', O.O_ORDERDATE) AS year,      SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT) - PS.PS_SUPPLYCOST * L.L_QUANTITY) AS profit FROM      PART P JOIN      LINEITEM L ON P.P_PARTKEY = L.L_PARTKEY JOIN      PARTSUPP PS ON L.L_PARTKEY = PS.PS_PARTKEY AND L.L_SUPPKEY = PS.PS_SUPPKEY JOIN      SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN      ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY JOIN      NATION N ON S.S_NATIONKEY = N.N_NATIONKEY WHERE      P.P_NAME LIKE '%green%' GROUP BY      nation, year ORDER BY      year DESC;",
+        "score": 0
+    },
+    {
+        "sample_id": "q93",
+        "db_id": "tpch",
+        "gold_sql": "select nation, o_year, sum(amount) as sum_profit from (  select  n_name as nation,  strftime('%Y', o_orderdate) as o_year,  l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount  from  part,  supplier,  lineitem,  partsupp,  orders,  nation  where  s_suppkey = l_suppkey  and ps_suppkey = l_suppkey  and ps_partkey = l_partkey  and p_partkey = l_partkey  and o_orderkey = l_orderkey  and s_nationkey = n_nationkey  and p_name like '%turquoise%' ) as profit group by nation, o_year order by nation, o_year desc;",
+        "pred_sql": "SELECT      N.N_NAME AS nation,      O.O_ORDERDATE,      (L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT) - PS.PS_SUPPLYCOST * L.L_QUANTITY) AS amount FROM      PART P JOIN      LINEITEM L ON P.P_PARTKEY = L.L_PARTKEY JOIN      PARTSUPP PS ON L.L_PARTKEY = PS.PS_PARTKEY AND L.L_SUPPKEY = PS.PS_SUPPKEY JOIN      SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN      ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY JOIN      NATION N ON S.S_NATIONKEY = N.N_NATIONKEY WHERE      P.P_NAME LIKE '%turquoise%' ORDER BY      strftime('%Y', O.O_ORDERDATE) DESC;",
+        "score": 0
+    },
+    {
+        "sample_id": "q94",
+        "db_id": "tpch",
+        "gold_sql": "select nation, o_year, sum(amount) as sum_profit from (  select  n_name as nation,  strftime('%Y', o_orderdate) as o_year,  l_extendedprice * (1 - l_discount) - ps_supplycost * l_quantity as amount  from  part,  supplier,  lineitem,  partsupp,  orders,  nation  where  s_suppkey = l_suppkey  and ps_suppkey = l_suppkey  and ps_partkey = l_partkey  and p_partkey = l_partkey  and o_orderkey = l_orderkey  and s_nationkey = n_nationkey  and p_name like '%green%' ) as profit group by nation, o_year order by nation, o_year desc;",
+        "pred_sql": "SELECT      N.N_NAME AS nation,      strftime('%Y', O.O_ORDERDATE) AS year,      SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT) - PS.PS_SUPPLYCOST * L.L_QUANTITY) AS profit FROM      PART P JOIN      LINEITEM L ON P.P_PARTKEY = L.L_PARTKEY JOIN      PARTSUPP PS ON L.L_PARTKEY = PS.PS_PARTKEY AND L.L_SUPPKEY = PS.PS_SUPPKEY JOIN      SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN      ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY JOIN      NATION N ON S.S_NATIONKEY = N.N_NATIONKEY WHERE      P.P_NAME LIKE '%green%' GROUP BY      nation, year ORDER BY      nation, year;",
+        "score": 0
+    },
+    {
+        "sample_id": "q101",
+        "db_id": "tpch",
+        "gold_sql": "select c_custkey, c_name, sum(l_extendedprice * (1 - l_discount)) as revenue, c_acctbal, n_name, c_address, c_phone, c_comment from customer, orders, lineitem, nation where c_custkey = o_custkey and l_orderkey = o_orderkey and o_orderdate >= '1993-07-01' and o_orderdate < date('1993-07-01', '+3 months') and l_returnflag = 'R' and c_nationkey = n_nationkey group by c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment order by revenue desc LIMIT 20;",
+        "pred_sql": "SELECT C.C_NAME, C.C_ADDRESS, N.N_NAME, C.C_PHONE, C.C_ACCTBAL, C.C_COMMENT, SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS REVENUE_LOST FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY JOIN NATION N ON C.C_NATIONKEY = N.N_NATIONKEY WHERE L.L_RETURNFLAG = 'R' AND L.L_SHIPDATE >= '1993-07-01' AND L.L_SHIPDATE < '1993-10-01' GROUP BY C.C_CUSTKEY, C.C_NAME, C.C_ADDRESS, N.N_NAME, C.C_PHONE, C.C_ACCTBAL, C.C_COMMENT ORDER BY REVENUE_LOST DESC LIMIT 20;",
+        "score": 0
+    },
+    {
+        "sample_id": "q102",
+        "db_id": "tpch",
+        "gold_sql": "select c_custkey, c_name, sum(l_extendedprice * (1 - l_discount)) as revenue, c_acctbal, n_name, c_address, c_phone, c_comment from customer, orders, lineitem, nation where c_custkey = o_custkey and l_orderkey = o_orderkey and o_orderdate >= '1993-10-01' and o_orderdate < date('1993-10-01', '+3 months') and l_returnflag = 'R' and c_nationkey = n_nationkey group by c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment order by revenue desc LIMIT 20;",
+        "pred_sql": "SELECT C.C_CUSTKEY, C.C_NAME, SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS LOST_REVENUE, C.C_ACCTBAL, N.N_NAME, C.C_ADDRESS, C.C_PHONE, C.C_COMMENT FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY JOIN NATION N ON C.C_NATIONKEY = N.N_NATIONKEY WHERE L.L_RETURNFLAG = 'R'   AND L.L_SHIPDATE BETWEEN '1993-10-01' AND '1993-12-31' GROUP BY C.C_CUSTKEY, C.C_NAME, C.C_ACCTBAL, N.N_NAME, C.C_ADDRESS, C.C_PHONE, C.C_COMMENT ORDER BY LOST_REVENUE DESC LIMIT 20;",
+        "score": 0
+    },
+    {
+        "sample_id": "q103",
+        "db_id": "tpch",
+        "gold_sql": "select c_custkey, c_name, sum(l_extendedprice * (1 - l_discount)) as revenue, c_acctbal, n_name, c_address, c_phone, c_comment from customer, orders, lineitem, nation where c_custkey = o_custkey and l_orderkey = o_orderkey and o_orderdate >= '1995-01-01' and o_orderdate < date('1995-01-01', '+3 months') and l_returnflag = 'R' and c_nationkey = n_nationkey group by c_custkey, c_name, c_acctbal, c_phone, n_name, c_address, c_comment order by revenue desc LIMIT 20;",
+        "pred_sql": "SELECT C.C_NAME, C.C_ADDRESS, N.N_NAME, C.C_PHONE, C.C_ACCTBAL, C.C_COMMENT, SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS REVENUE_LOST FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY JOIN NATION N ON C.C_NATIONKEY = N.N_NATIONKEY WHERE L.L_RETURNFLAG = 'R'   AND L.L_SHIPDATE BETWEEN '1995-01-01' AND '1995-03-31' GROUP BY C.C_CUSTKEY, C.C_NAME, C.C_ADDRESS, N.N_NAME, C.C_PHONE, C.C_ACCTBAL, C.C_COMMENT ORDER BY REVENUE_LOST DESC LIMIT 20;",
+        "score": 0
+    },
+    {
+        "sample_id": "q111",
+        "db_id": "tpch",
+        "gold_sql": "select ps_partkey, sum(ps_supplycost * ps_availqty) as value from partsupp, supplier, nation where ps_suppkey = s_suppkey and s_nationkey = n_nationkey and n_name = 'VIETNAM' group by ps_partkey having  sum(ps_supplycost * ps_availqty) > (  select   sum(ps_supplycost * ps_availqty) * 0.0001  from   partsupp,   supplier,   nation  where   ps_suppkey = s_suppkey   and s_nationkey = n_nationkey   and n_name = 'VIETNAM'  ) order by value desc LIMIT 10;",
+        "pred_sql": "SELECT T3.P_PARTKEY, SUM(T4.PS_AVAILQTY * T4.PS_SUPPLYCOST) AS part_value FROM SUPPLIER T1 JOIN NATION T2 ON T1.S_NATIONKEY = T2.N_NATIONKEY JOIN PARTSUPP T4 ON T1.S_SUPPKEY = T4.PS_SUPPKEY JOIN PART T3 ON T3.P_PARTKEY = T4.PS_PARTKEY WHERE T2.N_NAME = 'VIETNAM' GROUP BY T3.P_PARTKEY HAVING SUM(T4.PS_AVAILQTY * T4.PS_SUPPLYCOST) > 0.0001 * (SELECT SUM(PS_AVAILQTY * PS_SUPPLYCOST) FROM PARTSUPP) ORDER BY part_value DESC LIMIT 10;",
+        "score": 0
+    },
+    {
+        "sample_id": "q112",
+        "db_id": "tpch",
+        "gold_sql": "select ps_partkey, sum(ps_supplycost * ps_availqty) as value from partsupp, supplier, nation where ps_suppkey = s_suppkey and s_nationkey = n_nationkey and n_name = 'EGYPT' group by ps_partkey having  sum(ps_supplycost * ps_availqty) > (  select   sum(ps_supplycost * ps_availqty) * 0.0001  from   partsupp,   supplier,   nation  where   ps_suppkey = s_suppkey   and s_nationkey = n_nationkey   and n_name = 'EGYPT'  ) order by value desc LIMIT 10;",
+        "pred_sql": "SELECT T1.P_PARTKEY, SUM(T3.PS_SUPPLYCOST * T3.PS_AVAILQTY) AS part_value FROM PART T1 JOIN PARTSUPP T3 ON T1.P_PARTKEY = T3.PS_PARTKEY JOIN SUPPLIER T2 ON T3.PS_SUPPKEY = T2.S_SUPPKEY JOIN NATION T4 ON T2.S_NATIONKEY = T4.N_NATIONKEY WHERE T4.N_NAME = 'EGYPT' GROUP BY T1.P_PARTKEY HAVING part_value > 0.0001 * (SELECT SUM(PS_SUPPLYCOST * PS_AVAILQTY) FROM PARTSUPP T3 JOIN SUPPLIER T2 ON T3.PS_SUPPKEY = T2.S_SUPPKEY JOIN NATION T4 ON T2.S_NATIONKEY = T4.N_NATIONKEY WHERE T4.N_NAME = 'EGYPT') ORDER BY part_value DESC LIMIT 10;",
+        "score": 1
+    },
+    {
+        "sample_id": "q113",
+        "db_id": "tpch",
+        "gold_sql": "select ps_partkey, sum(ps_supplycost * ps_availqty) as value from partsupp, supplier, nation where ps_suppkey = s_suppkey and s_nationkey = n_nationkey and n_name = 'PERU' group by ps_partkey having  sum(ps_supplycost * ps_availqty) > (  select   sum(ps_supplycost * ps_availqty) * 0.0001  from   partsupp,   supplier,   nation  where   ps_suppkey = s_suppkey   and s_nationkey = n_nationkey   and n_name = 'PERU'  ) order by value desc LIMIT 10;",
+        "pred_sql": "SELECT PS.PS_PARTKEY, (PS.PS_AVAILQTY * PS.PS_SUPPLYCOST) AS part_value FROM PARTSUPP PS JOIN SUPPLIER S ON PS.PS_SUPPKEY = S.S_SUPPKEY JOIN NATION N ON S.S_NATIONKEY = N.N_NATIONKEY WHERE N.N_NAME = 'PERU' GROUP BY PS.PS_PARTKEY HAVING part_value > 0.0001 * (SELECT SUM(PS2.PS_AVAILQTY * PS2.PS_SUPPLYCOST)                              FROM PARTSUPP PS2                              JOIN SUPPLIER S2 ON PS2.PS_SUPPKEY = S2.S_SUPPKEY                              JOIN NATION N2 ON S2.S_NATIONKEY = N2.N_NATIONKEY                              WHERE N2.N_NAME = 'PERU') ORDER BY part_value DESC LIMIT 10;",
+        "score": 0
+    },
+    {
+        "sample_id": "q114",
+        "db_id": "tpch",
+        "gold_sql": "select ps_partkey, sum(ps_supplycost * ps_availqty) as value from partsupp, supplier, nation where ps_suppkey = s_suppkey and s_nationkey = n_nationkey and n_name = 'BRAZIL' group by ps_partkey having  sum(ps_supplycost * ps_availqty) > (  select   sum(ps_supplycost * ps_availqty) * 0.0001  from   partsupp,   supplier,   nation  where   ps_suppkey = s_suppkey   and s_nationkey = n_nationkey   and n_name = 'BRAZIL'  ) order by value desc LIMIT 10;",
+        "pred_sql": "SELECT PS.PS_PARTKEY, (PS.PS_SUPPLYCOST * PS.PS_AVAILQTY) AS value FROM PARTSUPP PS JOIN SUPPLIER S ON PS.PS_SUPPKEY = S.S_SUPPKEY JOIN NATION N ON S.S_NATIONKEY = N.N_NATIONKEY WHERE N.N_NAME = 'BRAZIL' AND (PS.PS_SUPPLYCOST * PS.PS_AVAILQTY) > 0.0001 * (     SELECT SUM(PS2.PS_SUPPLYCOST * PS2.PS_AVAILQTY)     FROM PARTSUPP PS2     JOIN SUPPLIER S2 ON PS2.PS_SUPPKEY = S2.S_SUPPKEY     JOIN NATION N2 ON S2.S_NATIONKEY = N2.N_NATIONKEY     WHERE N2.N_NAME = 'BRAZIL' ) ORDER BY value DESC LIMIT 10;",
+        "score": 0
+    },
+    {
+        "sample_id": "q115",
+        "db_id": "tpch",
+        "gold_sql": "select ps_partkey, sum(ps_supplycost * ps_availqty) as value from partsupp, supplier, nation where ps_suppkey = s_suppkey and s_nationkey = n_nationkey and n_name = 'GERMANY' group by ps_partkey having  sum(ps_supplycost * ps_availqty) > (  select   sum(ps_supplycost * ps_availqty) * 0.0001  from   partsupp,   supplier,   nation  where   ps_suppkey = s_suppkey   and s_nationkey = n_nationkey   and n_name = 'GERMANY'  ) order by value desc LIMIT 10;",
+        "pred_sql": "SELECT L_PARTKEY, SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS part_value FROM LINEITEM AS L JOIN SUPPLIER AS S ON L.L_SUPPKEY = S.S_SUPPKEY JOIN NATION AS N ON S.S_NATIONKEY = N.N_NATIONKEY WHERE N.N_NAME = 'GERMANY' GROUP BY L_PARTKEY HAVING SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) > 0.0001 * (SELECT SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) FROM LINEITEM WHERE L_SUPPKEY IN (SELECT S_SUPPKEY FROM SUPPLIER WHERE S_NATIONKEY = (SELECT N_NATIONKEY FROM NATION WHERE N_NAME = 'GERMANY'))) ORDER BY part_value DESC LIMIT 10;",
+        "score": 0
+    },
+    {
+        "sample_id": "q121",
+        "db_id": "tpch",
+        "gold_sql": "select l_shipmode, sum(case  when o_orderpriority = '1-URGENT'  or o_orderpriority = '2-HIGH'  then 1  else 0 end) as high_line_count, sum(case  when o_orderpriority <> '1-URGENT'  and o_orderpriority <> '2-HIGH'  then 1  else 0 end) as low_line_count from orders, lineitem where o_orderkey = l_orderkey and l_shipmode in ('MAIL', 'REG AIR') and l_commitdate < l_receiptdate and l_shipdate < l_commitdate and l_receiptdate >= '1993-01-01' and l_receiptdate < '1994-01-01' group by l_shipmode order by l_shipmode;",
+        "pred_sql": "SELECT      CASE          WHEN O_ORDERPRIORITY IN ('1-URGENT', '2-HIGH') THEN 'URGENT/HIGH'         ELSE 'OTHER'     END AS PRIORITY_CATEGORY,     COUNT(DISTINCT O_ORDERKEY) AS LATE_ORDER_COUNT FROM      ORDERS AS T1 JOIN      LINEITEM AS T2 ON T1.O_ORDERKEY = T2.L_ORDERKEY WHERE      T2.L_COMMITDATE < T2.L_RECEIPTDATE     AND T2.L_SHIPDATE < T2.L_COMMITDATE     AND T2.L_SHIPMODE IN ('MAIL', 'REG AIR')     AND T2.L_RECEIPTDATE >= '1993-01-01'     AND T2.L_RECEIPTDATE < '1994-01-01' GROUP BY      PRIORITY_CATEGORY;",
+        "score": 0
+    },
+    {
+        "sample_id": "q122",
+        "db_id": "tpch",
+        "gold_sql": "select l_shipmode, sum(case  when o_orderpriority = '1-URGENT'  or o_orderpriority = '2-HIGH'  then 1  else 0 end) as high_line_count, sum(case  when o_orderpriority <> '1-URGENT'  and o_orderpriority <> '2-HIGH'  then 1  else 0 end) as low_line_count from orders, lineitem where o_orderkey = l_orderkey and l_shipmode in ('AIR', 'TRUCK') and l_commitdate < l_receiptdate and l_shipdate < l_commitdate and l_receiptdate >= '1995-01-01' and l_receiptdate < '1996-01-01' group by l_shipmode order by l_shipmode;",
+        "pred_sql": "SELECT      CASE          WHEN O_ORDERPRIORITY IN ('1-URGENT', '2-HIGH') THEN 'URGENT/HIGH'          ELSE 'OTHER'      END AS PRIORITY_CATEGORY,      L_SHIPMODE,      COUNT(*) AS LATE_ITEMS_COUNT FROM      ORDERS AS T1 JOIN      LINEITEM AS T2 ON T1.O_ORDERKEY = T2.L_ORDERKEY WHERE      T2.L_COMMITDATE < T2.L_RECEIPTDATE      AND T2.L_SHIPDATE < T2.L_COMMITDATE      AND T2.L_SHIPMODE IN ('AIR', 'TRUCK')      AND T2.L_RECEIPTDATE >= '1995-01-01'      AND T2.L_RECEIPTDATE < '1996-01-01' GROUP BY      PRIORITY_CATEGORY,      L_SHIPMODE;",
+        "score": 0
+    },
+    {
+        "sample_id": "q123",
+        "db_id": "tpch",
+        "gold_sql": "select l_shipmode, sum(case  when o_orderpriority = '1-URGENT'  or o_orderpriority = '2-HIGH'  then 1  else 0 end) as high_line_count, sum(case  when o_orderpriority <> '1-URGENT'  and o_orderpriority <> '2-HIGH'  then 1  else 0 end) as low_line_count from orders, lineitem where o_orderkey = l_orderkey and l_shipmode in ('SHIP', 'FOB') and l_commitdate < l_receiptdate and l_shipdate < l_commitdate and l_receiptdate >= '1997-01-01' and l_receiptdate < '1998-01-01' group by l_shipmode order by l_shipmode;",
+        "pred_sql": "SELECT      CASE          WHEN O_ORDERPRIORITY IN ('1-URGENT', '2-HIGH') THEN 'URGENT/HIGH'         ELSE 'OTHERS'     END AS PRIORITY_CATEGORY,     L_SHIPMODE,     COUNT(*) AS LATE_ITEMS_COUNT FROM      ORDERS AS T1 JOIN      LINEITEM AS T2 ON T1.O_ORDERKEY = T2.L_ORDERKEY WHERE      T2.L_COMMITDATE < T2.L_RECEIPTDATE     AND T2.L_SHIPDATE < T2.L_COMMITDATE     AND T2.L_SHIPMODE IN ('SHIP', 'FOB')     AND T2.L_RECEIPTDATE >= '1997-01-01'     AND T2.L_RECEIPTDATE < '1998-01-01' GROUP BY      PRIORITY_CATEGORY, L_SHIPMODE ORDER BY      PRIORITY_CATEGORY, L_SHIPMODE;",
+        "score": 0
+    },
+    {
+        "sample_id": "q124",
+        "db_id": "tpch",
+        "gold_sql": "select l_shipmode, sum(case  when o_orderpriority = '1-URGENT'  or o_orderpriority = '2-HIGH'  then 1  else 0 end) as high_line_count, sum(case  when o_orderpriority <> '1-URGENT'  and o_orderpriority <> '2-HIGH'  then 1  else 0 end) as low_line_count from orders, lineitem where o_orderkey = l_orderkey and l_shipmode in ('MAIL', 'TRUCK') and l_commitdate < l_receiptdate and l_shipdate < l_commitdate and l_receiptdate >= '1995-01-01' and l_receiptdate < '1996-01-01' group by l_shipmode order by l_shipmode;",
+        "pred_sql": "SELECT      CASE          WHEN O_ORDERPRIORITY IN ('1-URGENT', '2-HIGH') THEN 'URGENT/HIGH'         ELSE 'OTHERS'     END AS PRIORITY_CATEGORY,     COUNT(*) AS LINEITEM_COUNT FROM      ORDERS AS T1 JOIN      LINEITEM AS T2 ON T1.O_ORDERKEY = T2.L_ORDERKEY WHERE      T2.L_SHIPDATE < T2.L_COMMITDATE     AND T2.L_RECEIPTDATE > T2.L_COMMITDATE     AND T2.L_RECEIPTDATE >= '1995-01-01'     AND T2.L_RECEIPTDATE < '1996-01-01'     AND T2.L_SHIPMODE IN ('MAIL', 'TRUCK') GROUP BY      PRIORITY_CATEGORY;",
+        "score": 0
+    },
+    {
+        "sample_id": "q131",
+        "db_id": "tpch",
+        "gold_sql": "select c_count, count(*) as custdist from (  select  c_custkey,  count(o_orderkey) as c_count  from  customer left outer join orders on   c_custkey = o_custkey   and o_comment not like '%special%packages%'  group by  c_custkey ) as c_orders group by c_count order by custdist desc, c_count desc;",
+        "pred_sql": "SELECT C.C_CUSTKEY, COUNT(O.O_ORDERKEY) AS order_count FROM CUSTOMER C LEFT OUTER JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY AND O.O_COMMENT NOT LIKE '%special%' AND O.O_COMMENT NOT LIKE '%packages%' GROUP BY C.C_CUSTKEY;",
+        "score": 0
+    },
+    {
+        "sample_id": "q132",
+        "db_id": "tpch",
+        "gold_sql": "select c_count, count(*) as custdist from (  select  c_custkey,  count(o_orderkey) as c_count  from  customer left outer join orders on   c_custkey = o_custkey   and o_comment not like '%pending%requests%'  group by  c_custkey ) as c_orders group by c_count order by custdist desc, c_count desc;",
+        "pred_sql": "SELECT C.C_CUSTKEY, COUNT(O.O_ORDERKEY) AS order_count FROM CUSTOMER C LEFT OUTER JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY AND O.O_COMMENT NOT LIKE '%pending%' AND O.O_COMMENT NOT LIKE '%requests%' GROUP BY C.C_CUSTKEY;",
+        "score": 0
+    },
+    {
+        "sample_id": "q133",
+        "db_id": "tpch",
+        "gold_sql": "select c_count, count(*) as custdist from (  select  c_custkey,  count(o_orderkey) as c_count  from  customer left outer join orders on   c_custkey = o_custkey   and o_comment not like '%unusual%accounts%'  group by  c_custkey ) as c_orders group by c_count order by custdist desc, c_count desc;",
+        "pred_sql": "SELECT C.C_CUSTKEY, COUNT(O.O_ORDERKEY) AS order_count FROM CUSTOMER C LEFT OUTER JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY AND O.O_COMMENT NOT LIKE '%unusual%' AND O.O_COMMENT NOT LIKE '%accounts%' GROUP BY C.C_CUSTKEY;",
+        "score": 0
+    },
+    {
+        "sample_id": "q141",
+        "db_id": "tpch",
+        "gold_sql": "select 100.00 * sum(case  when p_type like 'PROMO%'  then l_extendedprice * (1 - l_discount)  else 0 end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue from lineitem, part where l_partkey = p_partkey and l_shipdate >= '1993-09-01' and l_shipdate < date('1993-09-01', '+1 month');",
+        "pred_sql": "SELECT 100.00 * SUM(CASE WHEN P.p_type LIKE 'PROMO%' THEN L.l_extendedprice * (1 - L.l_discount) ELSE 0 END) / SUM(L.l_extendedprice * (1 - L.l_discount)) AS promo_revenue FROM LINEITEM L JOIN PART P ON L.l_partkey = P.p_partkey WHERE L.l_shipdate BETWEEN '1993-09-01' AND '1993-09-30';",
+        "score": 1
+    },
+    {
+        "sample_id": "q142",
+        "db_id": "tpch",
+        "gold_sql": "select 100.00 * sum(case  when p_type like 'PROMO%'  then l_extendedprice * (1 - l_discount)  else 0 end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue from lineitem, part where l_partkey = p_partkey and l_shipdate >= '1995-03-01' and l_shipdate < date('1995-03-01', '+1 month');",
+        "pred_sql": "SELECT 100.00 * SUM(CASE WHEN P.P_TYPE LIKE 'PROMO%' THEN L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT) ELSE 0 END) / SUM(L.L_EXTENDEDPRICE * (1 - L.L_DISCOUNT)) AS promo_revenue FROM LINEITEM L JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY WHERE L.L_SHIPDATE BETWEEN '1995-03-01' AND '1995-03-31';",
+        "score": 1
+    },
+    {
+        "sample_id": "q143",
+        "db_id": "tpch",
+        "gold_sql": "select 100.00 * sum(case  when p_type like 'PROMO%'  then l_extendedprice * (1 - l_discount)  else 0 end) / sum(l_extendedprice * (1 - l_discount)) as promo_revenue from lineitem, part where l_partkey = p_partkey and l_shipdate >= '1997-05-01' and l_shipdate < date('1997-05-01', '+1 month');",
+        "pred_sql": "SELECT 100.00 * SUM(CASE WHEN P.p_type LIKE 'PROMO%' THEN L.l_extendedprice * (1 - L.l_discount) ELSE 0 END) / SUM(L.l_extendedprice * (1 - L.l_discount)) AS promo_revenue FROM LINEITEM L JOIN PART P ON L.l_partkey = P.p_partkey WHERE L.l_shipdate BETWEEN '1997-05-01' AND '1997-05-31';",
+        "score": 1
+    },
+    {
+        "sample_id": "q151",
+        "db_id": "tpch",
+        "gold_sql": " with revenue0 as (select  l_suppkey as supplier_no,  sum(l_extendedprice * (1 - l_discount)) as total_revenue from  lineitem where  l_shipdate >= '1993-03-01'  and l_shipdate < date('1993-03-01', '+3 months') group by  l_suppkey)  select s_suppkey, s_name, s_address, s_phone, total_revenue from supplier, revenue0 where s_suppkey = supplier_no and total_revenue = (  select  max(total_revenue)  from  revenue0 ) order by s_suppkey;",
+        "pred_sql": "WITH SupplierRevenue AS (     SELECT S.S_SUPPKEY, SUM(L.L_EXTENDEDPRICE) AS total_revenue     FROM SUPPLIER S     JOIN LINEITEM L ON S.S_SUPPKEY = L.L_SUPPKEY     JOIN ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY     WHERE L.L_SHIPDATE BETWEEN '1993-03-01' AND '1993-05-31'     GROUP BY S.S_SUPPKEY ), MaxRevenue AS (     SELECT MAX(total_revenue) AS max_revenue     FROM SupplierRevenue ) SELECT SR.S_SUPPKEY, SR.total_revenue FROM SupplierRevenue SR JOIN MaxRevenue MR ON SR.total_revenue = MR.max_revenue ORDER BY SR.S_SUPPKEY;",
+        "score": 0
+    },
+    {
+        "sample_id": "q152",
+        "db_id": "tpch",
+        "gold_sql": " with revenue0 as (select  l_suppkey as supplier_no,  sum(l_extendedprice * (1 - l_discount)) as total_revenue from  lineitem where  l_shipdate >= '1995-07-01'  and l_shipdate < date('1995-07-01', '+3 months') group by  l_suppkey)  select s_suppkey, s_name, s_address, s_phone, total_revenue from supplier, revenue0 where s_suppkey = supplier_no and total_revenue = (  select  max(total_revenue)  from  revenue0 ) order by s_suppkey;",
+        "pred_sql": "WITH SupplierRevenue AS (     SELECT S.S_SUPPKEY, SUM(L.L_EXTENDEDPRICE) AS total_revenue     FROM LINEITEM L     JOIN SUPPLIER S ON L.L_SUPPKEY = S.S_SUPPKEY     WHERE L.L_SHIPDATE BETWEEN '1995-07-01' AND '1995-09-30'     GROUP BY S.S_SUPPKEY ) SELECT S_SUPPKEY, total_revenue FROM SupplierRevenue WHERE total_revenue = (SELECT MAX(total_revenue) FROM SupplierRevenue)",
+        "score": 0
+    },
+    {
+        "sample_id": "q153",
+        "db_id": "tpch",
+        "gold_sql": " with revenue0 as (select  l_suppkey as supplier_no,  sum(l_extendedprice * (1 - l_discount)) as total_revenue from  lineitem where  l_shipdate >= '1996-09-01'  and l_shipdate < date('1996-09-01', '+3 months') group by  l_suppkey)  select s_suppkey, s_name, s_address, s_phone, total_revenue from supplier, revenue0 where s_suppkey = supplier_no and total_revenue = (  select  max(total_revenue)  from  revenue0 ) order by s_suppkey;",
+        "pred_sql": "WITH SupplierRevenue AS (     SELECT S_SUPPKEY, SUM(L_EXTENDEDPRICE) AS total_revenue     FROM LINEITEM AS L     JOIN SUPPLIER AS S ON L.L_SUPPKEY = S.S_SUPPKEY     WHERE L.L_SHIPDATE BETWEEN '1996-09-01' AND '1996-11-30'     GROUP BY S_SUPPKEY ) SELECT S_SUPPKEY, total_revenue FROM SupplierRevenue WHERE total_revenue = (SELECT MAX(total_revenue) FROM SupplierRevenue)",
+        "score": 0
+    },
+    {
+        "sample_id": "q161",
+        "db_id": "tpch",
+        "gold_sql": "select p_brand, p_type, p_size, count(distinct ps_suppkey) as supplier_cnt from partsupp, part where p_partkey = ps_partkey and p_brand <> 'Brand#45' and p_type not like 'MEDIUM POLISHED%' and p_size in (49, 14, 23, 45, 19, 3, 36, 9) and ps_suppkey not in (  select  s_suppkey  from  supplier  where  s_comment like '%Customer%Complaints%' ) group by p_brand, p_type, p_size order by supplier_cnt desc, p_brand, p_type, p_size LIMIT 10;",
+        "pred_sql": "SELECT P.P_BRAND, P.P_TYPE, P.P_SIZE, COUNT(DISTINCT PS.PS_SUPPKEY) AS SUPPLIER_CNT FROM PARTSUPP PS JOIN PART P ON P.P_PARTKEY = PS.PS_PARTKEY JOIN SUPPLIER S ON S.S_SUPPKEY = PS.PS_SUPPKEY WHERE P.P_SIZE IN (49, 14, 23, 45, 19, 3, 36, 9)   AND P.P_BRAND <> 'Brand#45'   AND P.P_TYPE NOT LIKE 'MEDIUM POLISHED%'   AND S.S_COMMENT NOT LIKE '%Customer%'   AND S.S_COMMENT NOT LIKE '%Complaints%' GROUP BY P.P_BRAND, P.P_TYPE, P.P_SIZE ORDER BY SUPPLIER_CNT DESC, P.P_BRAND, P.P_TYPE, P.P_SIZE LIMIT 10;",
+        "score": 1
+    },
+    {
+        "sample_id": "q162",
+        "db_id": "tpch",
+        "gold_sql": "select p_brand, p_type, p_size, count(distinct ps_suppkey) as supplier_cnt from partsupp, part where p_partkey = ps_partkey and p_brand <> 'Brand#32' and p_type not like 'SMALL BURNISHED%' and p_size in (49, 14, 23, 45, 19, 3, 36, 9) and ps_suppkey not in (  select  s_suppkey  from  supplier  where  s_comment like '%Customer%Complaints%' ) group by p_brand, p_type, p_size order by supplier_cnt desc, p_brand, p_type, p_size LIMIT 10;",
+        "pred_sql": "SELECT P.P_BRAND, P.P_TYPE, P.P_SIZE, COUNT(DISTINCT PS.PS_SUPPKEY) AS supplier_cnt FROM PART P JOIN PARTSUPP PS ON P.P_PARTKEY = PS.PS_PARTKEY JOIN SUPPLIER S ON PS.PS_SUPPKEY = S.S_SUPPKEY WHERE P.P_BRAND <> 'Brand#32'   AND P.P_TYPE NOT LIKE 'SMALL BURNISHED%'   AND P.P_SIZE IN (49, 14, 23, 45, 19, 3, 36, 9)   AND S.S_COMMENT NOT LIKE '%Customer%'   AND S.S_COMMENT NOT LIKE '%Complaints%' GROUP BY P.P_BRAND, P.P_TYPE, P.P_SIZE ORDER BY supplier_cnt DESC, P.P_BRAND, P.P_TYPE, P.P_SIZE LIMIT 10;",
+        "score": 1
+    },
+    {
+        "sample_id": "q163",
+        "db_id": "tpch",
+        "gold_sql": "select p_brand, p_type, p_size, count(distinct ps_suppkey) as supplier_cnt from partsupp, part where p_partkey = ps_partkey and p_brand <> 'Brand#15' and p_type not like 'STANDARD ANODIZED%' and p_size in (49, 14, 23, 45, 19, 3, 36, 9) and ps_suppkey not in (  select  s_suppkey  from  supplier  where  s_comment like '%Customer%Complaints%' ) group by p_brand, p_type, p_size order by supplier_cnt desc, p_brand, p_type, p_size LIMIT 10;",
+        "pred_sql": "SELECT P.P_BRAND, P.P_TYPE, P.P_SIZE, COUNT(DISTINCT PS.PS_SUPPKEY) AS SUPPLIER_CNT FROM PART P JOIN PARTSUPP PS ON P.P_PARTKEY = PS.PS_PARTKEY JOIN SUPPLIER S ON PS.PS_SUPPKEY = S.S_SUPPKEY WHERE P.P_SIZE IN (49, 14, 23, 45, 19, 3, 36, 9)   AND P.P_BRAND <> 'Brand#15'   AND P.P_TYPE NOT LIKE 'STANDARD ANODIZED%'   AND S.S_COMMENT NOT LIKE '%Customer%Complaints%' GROUP BY P.P_BRAND, P.P_TYPE, P.P_SIZE ORDER BY SUPPLIER_CNT DESC, P.P_BRAND ASC, P.P_TYPE ASC, P.P_SIZE ASC LIMIT 10;",
+        "score": 1
+    },
+    {
+        "sample_id": "q171",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice) / (strftime('%Y', max(o_orderdate))-strftime('%Y', min(o_orderdate))) as avg_yearly from lineitem,     orders,                                                                             part, (SELECT   l_partkey AS agg_partkey,   0.2 * avg(l_quantity) AS avg_quantity  FROM lineitem  GROUP BY l_partkey) part_agg where p_partkey = l_partkey     and l_orderkey = o_orderkey and agg_partkey = l_partkey and p_brand = 'Brand#23' and p_container = 'MED BOX' and l_quantity < avg_quantity;",
+        "pred_sql": "WITH AvgQuantity AS (     SELECT AVG(L.L_QUANTITY) AS avg_qty     FROM LINEITEM L     JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY     WHERE P.P_BRAND = 'Brand#23' AND P.P_CONTAINER = 'MED BOX' ) SELECT SUM(L.L_EXTENDEDPRICE) AS revenue_loss FROM LINEITEM L JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY JOIN AvgQuantity A ON 1=1 WHERE P.P_BRAND = 'Brand#23' AND P.P_CONTAINER = 'MED BOX' AND L.L_QUANTITY < 0.2 * A.avg_qty;",
+        "score": 0
+    },
+    {
+        "sample_id": "q172",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice) / (strftime('%Y', max(o_orderdate))-strftime('%Y', min(o_orderdate))) as avg_yearly from lineitem,     orders, part, (SELECT   l_partkey AS agg_partkey,   0.2 * avg(l_quantity) AS avg_quantity  FROM lineitem  GROUP BY l_partkey) part_agg where p_partkey = l_partkey     and l_orderkey = o_orderkey and agg_partkey = l_partkey and p_brand = 'Brand#14' and p_container = 'JUMBO JAR' and l_quantity < avg_quantity;",
+        "pred_sql": "SELECT SUM(L.L_EXTENDEDPRICE) AS revenue_loss FROM LINEITEM L JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY WHERE P.P_BRAND = 'Brand#14' AND P.P_CONTAINER = 'JUMBO JAR' AND L.L_QUANTITY < (     SELECT AVG(L_QUANTITY) * 0.2     FROM LINEITEM L     JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY     WHERE P.P_BRAND = 'Brand#14' AND P.P_CONTAINER = 'JUMBO JAR' );",
+        "score": 0
+    },
+    {
+        "sample_id": "q173",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice) / (strftime('%Y', max(o_orderdate))-strftime('%Y', min(o_orderdate))) as avg_yearly from lineitem,     orders, part, (SELECT   l_partkey AS agg_partkey,   0.2 * avg(l_quantity) AS avg_quantity  FROM lineitem  GROUP BY l_partkey) part_agg where p_partkey = l_partkey     and l_orderkey = o_orderkey and agg_partkey = l_partkey and p_brand = 'Brand#45' and p_container = 'WRAP PKG' and l_quantity < avg_quantity;",
+        "pred_sql": "WITH AvgQuantity AS (     SELECT AVG(L.L_QUANTITY) AS avg_qty     FROM LINEITEM L     JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY     WHERE P.P_BRAND = 'Brand#45' AND P.P_CONTAINER = 'WRAP PKG' ) SELECT SUM(L.L_EXTENDEDPRICE) AS potential_revenue_loss FROM LINEITEM L JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY WHERE P.P_BRAND = 'Brand#45' AND P.P_CONTAINER = 'WRAP PKG' AND L.L_QUANTITY < (SELECT 0.2 * avg_qty FROM AvgQuantity);",
+        "score": 0
+    },
+    {
+        "sample_id": "q181",
+        "db_id": "tpch",
+        "gold_sql": "select c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity) from customer, orders, lineitem where o_orderkey in (  select  l_orderkey  from  lineitem  group by  l_orderkey having   sum(l_quantity) > 300 ) and c_custkey = o_custkey and o_orderkey = l_orderkey group by c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice order by o_totalprice desc, o_orderdate LIMIT 100;",
+        "pred_sql": "SELECT C.C_NAME, C.C_CUSTKEY, O.O_ORDERKEY, O.O_ORDERDATE, O.O_TOTALPRICE, SUM(L.L_QUANTITY) AS TOTAL_QUANTITY FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY GROUP BY C.C_NAME, C.C_CUSTKEY, O.O_ORDERKEY, O.O_ORDERDATE, O.O_TOTALPRICE HAVING SUM(L.L_QUANTITY) > 300 ORDER BY O.O_TOTALPRICE DESC, O.O_ORDERDATE LIMIT 100;",
+        "score": 1
+    },
+    {
+        "sample_id": "q182",
+        "db_id": "tpch",
+        "gold_sql": "select c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity) from customer, orders, lineitem where o_orderkey in (  select  l_orderkey  from  lineitem  group by  l_orderkey having   sum(l_quantity) > 312 ) and c_custkey = o_custkey and o_orderkey = l_orderkey group by c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice order by o_totalprice desc, o_orderdate LIMIT 100;",
+        "pred_sql": "SELECT C.C_NAME, C.C_CUSTKEY, O.O_ORDERKEY, O.O_ORDERDATE, O.O_TOTALPRICE, SUM(L.L_QUANTITY) AS TOTAL_QUANTITY FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY GROUP BY C.C_NAME, C.C_CUSTKEY, O.O_ORDERKEY, O.O_ORDERDATE, O.O_TOTALPRICE HAVING SUM(L.L_QUANTITY) > 312 ORDER BY O.O_TOTALPRICE DESC, O.O_ORDERDATE LIMIT 100;",
+        "score": 1
+    },
+    {
+        "sample_id": "q183",
+        "db_id": "tpch",
+        "gold_sql": "select c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice, sum(l_quantity) from customer, orders, lineitem where o_orderkey in (  select  l_orderkey  from  lineitem  group by  l_orderkey having   sum(l_quantity) > 315 ) and c_custkey = o_custkey and o_orderkey = l_orderkey group by c_name, c_custkey, o_orderkey, o_orderdate, o_totalprice order by o_totalprice desc, o_orderdate LIMIT 100;",
+        "pred_sql": "SELECT C.C_NAME, C.C_CUSTKEY, O.O_ORDERKEY, O.O_ORDERDATE, O.O_TOTALPRICE, SUM(L.L_QUANTITY) AS TOTAL_QUANTITY FROM CUSTOMER C JOIN ORDERS O ON C.C_CUSTKEY = O.O_CUSTKEY JOIN LINEITEM L ON O.O_ORDERKEY = L.L_ORDERKEY WHERE O.O_ORDERKEY IN (     SELECT L_ORDERKEY     FROM LINEITEM     GROUP BY L_ORDERKEY     HAVING SUM(L_QUANTITY) > 315 ) GROUP BY C.C_NAME, C.C_CUSTKEY, O.O_ORDERKEY, O.O_ORDERDATE, O.O_TOTALPRICE ORDER BY O.O_TOTALPRICE DESC, O.O_ORDERDATE LIMIT 100;",
+        "score": 1
+    },
+    {
+        "sample_id": "q191",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice* (1 - l_discount)) as revenue from lineitem, part where (  p_partkey = l_partkey  and p_brand = 'Brand#12'  and p_container like '%SM%'  and l_quantity >= 1 and l_quantity <= 11  and p_size between 1 and 5  and l_shipmode in ('AIR', 'AIR REG')  and l_shipinstruct = 'DELIVER IN PERSON' );",
+        "pred_sql": "SELECT SUM(L.l_extendedprice * (1 - L.l_discount)) AS revenue FROM LINEITEM L JOIN PART P ON P.p_partkey = L.l_partkey WHERE P.p_brand = 'Brand#12'   AND P.p_container LIKE '%SM%'   AND P.p_size BETWEEN 1 AND 5   AND L.l_quantity BETWEEN 1 AND 11   AND L.l_shipmode IN ('AIR', 'AIR REG')   AND L.l_shipinstruct = 'DELIVER IN PERSON'",
+        "score": 1
+    },
+    {
+        "sample_id": "q192",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice* (1 - l_discount)) as revenue from lineitem, part where (  p_partkey = l_partkey  and p_brand = 'Brand#23'  and p_container like '%LG%'  and l_quantity >= 10 and l_quantity <= 20  and p_size between 1 and 10  and l_shipmode in ('AIR', 'AIR REG')  and l_shipinstruct = 'DELIVER IN PERSON' );",
+        "pred_sql": "SELECT SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS revenue FROM LINEITEM AS T1 JOIN PART AS T2 ON T1.L_PARTKEY = T2.P_PARTKEY WHERE T2.P_BRAND = 'Brand#23'   AND T2.P_CONTAINER LIKE '%LG%'   AND T2.P_SIZE BETWEEN 1 AND 10   AND T1.L_QUANTITY BETWEEN 10 AND 20   AND T1.L_SHIPMODE IN ('AIR', 'AIR REG')   AND T1.L_SHIPINSTRUCT = 'DELIVER IN PERSON'",
+        "score": 1
+    },
+    {
+        "sample_id": "q193",
+        "db_id": "tpch",
+        "gold_sql": "select sum(l_extendedprice* (1 - l_discount)) as revenue from lineitem, part where (  p_partkey = l_partkey  and p_brand = 'Brand#34'  and p_container like '%MED%'  and l_quantity >= 20 and l_quantity <= 30  and p_size between 1 and 15  and l_shipmode in ('AIR', 'AIR REG')  and l_shipinstruct = 'DELIVER IN PERSON' );",
+        "pred_sql": "SELECT SUM(L_EXTENDEDPRICE * (1 - L_DISCOUNT)) AS revenue FROM LINEITEM AS T1 JOIN PART AS T2 ON T1.L_PARTKEY = T2.P_PARTKEY WHERE T2.P_BRAND = 'Brand#34'   AND T2.P_CONTAINER LIKE '%MED%'   AND T2.P_SIZE BETWEEN 1 AND 15   AND T1.L_QUANTITY BETWEEN 20 AND 30   AND T1.L_SHIPMODE = 'AIR'   AND T1.L_SHIPINSTRUCT = 'DELIVER IN PERSON'",
+        "score": 1
+    },
+    {
+        "sample_id": "q201",
+        "db_id": "tpch",
+        "gold_sql": "select s_name, s_address from supplier, nation where s_suppkey in (  select  ps_suppkey  from  partsupp,  (   select   l_partkey agg_partkey,   l_suppkey agg_suppkey,   0.5 * sum(l_quantity) AS agg_quantity   from   lineitem   where   l_shipdate >= '1993-01-01'   and l_shipdate < '1994-01-01'   group by   l_partkey,   l_suppkey  ) agg_lineitem  where  agg_partkey = ps_partkey  and agg_suppkey = ps_suppkey  and ps_partkey in (   select   p_partkey   from   part   where   p_name like '%forest%'  )  and ps_availqty > agg_quantity ) and s_nationkey = n_nationkey and n_name = 'CANADA' order by s_name LIMIT 100;",
+        "pred_sql": "SELECT DISTINCT S.S_SUPPKEY FROM SUPPLIER S JOIN LINEITEM L ON S.S_SUPPKEY = L.L_SUPPKEY JOIN ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY JOIN PART P ON L.L_PARTKEY = P.P_PARTKEY JOIN NATION N ON S.S_NATIONKEY = N.N_NATIONKEY JOIN REGION R ON N.N_REGIONKEY = R.R_REGIONKEY JOIN PARTSUPP PS ON L.L_PARTKEY = PS.PS_PARTKEY AND L.L_SUPPKEY = PS.PS_SUPPKEY WHERE O.O_ORDERDATE LIKE '1993%'   AND N.N_NAME = 'CANADA'   AND P.P_NAME LIKE '%forest%'   AND L.L_QUANTITY > 1.5 * PS.PS_AVAILQTY LIMIT 100;",
+        "score": 0
+    },
+    {
+        "sample_id": "q202",
+        "db_id": "tpch",
+        "gold_sql": "select s_name, s_address from supplier, nation where s_suppkey in (  select  ps_suppkey  from  partsupp,  (   select   l_partkey agg_partkey,   l_suppkey agg_suppkey,   0.5 * sum(l_quantity) AS agg_quantity   from   lineitem   where   l_shipdate >= '1995-01-01'   and l_shipdate < '1996-01-01'   group by   l_partkey,   l_suppkey  ) agg_lineitem  where  agg_partkey = ps_partkey  and agg_suppkey = ps_suppkey  and ps_partkey in (   select   p_partkey   from   part   where   p_name like '%green%'  )  and ps_availqty > agg_quantity ) and s_nationkey = n_nationkey and n_name = 'VIETNAM' order by s_name LIMIT 100;",
+        "pred_sql": "SELECT DISTINCT S.S_NAME FROM SUPPLIER S JOIN PARTSUPP PS ON S.S_SUPPKEY = PS.PS_SUPPKEY JOIN PART P ON PS.PS_PARTKEY = P.P_PARTKEY JOIN LINEITEM L ON PS.PS_PARTKEY = L.L_PARTKEY AND PS.PS_SUPPKEY = L.L_SUPPKEY JOIN ORDERS O ON L.L_ORDERKEY = O.O_ORDERKEY JOIN NATION N ON S.S_NATIONKEY = N.N_NATIONKEY WHERE O.O_ORDERDATE LIKE '1995%'    AND N.N_NAME = 'VIETNAM'   AND P.P_NAME LIKE '%green%' GROUP BY S.S_NAME, PS.PS_PARTKEY HAVING SUM(L.L_QUANTITY) * 2 < PS.PS_AVAILQTY LIMIT 100;",
+        "score": 0
+    },
+    {
+        "sample_id": "q203",
+        "db_id": "tpch",
+        "gold_sql": "select s_name, s_address from supplier, nation where s_suppkey in (  select  ps_suppkey  from  partsupp,  (   select   l_partkey agg_partkey,   l_suppkey agg_suppkey,   0.5 * sum(l_quantity) AS agg_quantity   from   lineitem   where   l_shipdate >= '1997-01-01'   and l_shipdate < '1998-01-01'   group by   l_partkey,   l_suppkey  ) agg_lineitem  where  agg_partkey = ps_partkey  and agg_suppkey = ps_suppkey  and ps_partkey in (   select   p_partkey   from   part   where   p_name like '%light%'  )  and ps_availqty > agg_quantity ) and s_nationkey = n_nationkey and n_name = 'GERMANY' order by s_name LIMIT 100;",
+        "pred_sql": "SELECT DISTINCT T1.S_NAME FROM SUPPLIER T1 JOIN PARTSUPP T2 ON T1.S_SUPPKEY = T2.PS_SUPPKEY JOIN PART T3 ON T2.PS_PARTKEY = T3.P_PARTKEY JOIN LINEITEM T4 ON T3.P_PARTKEY = T4.L_PARTKEY AND T1.S_SUPPKEY = T4.L_SUPPKEY JOIN ORDERS T5 ON T4.L_ORDERKEY = T5.O_ORDERKEY JOIN NATION T6 ON T1.S_NATIONKEY = T6.N_NATIONKEY WHERE T5.O_ORDERDATE LIKE '1997%'   AND T6.N_NAME = 'GERMANY'   AND T3.P_NAME LIKE '%light%'   AND T2.PS_AVAILQTY > 0.5 * T4.L_QUANTITY LIMIT 100;",
+        "score": 0
+    },
+    {
+        "sample_id": "q211",
+        "db_id": "tpch",
+        "gold_sql": "select s_name, count(*) as numwait from supplier, lineitem l1, orders, nation where s_suppkey = l1.l_suppkey and o_orderkey = l1.l_orderkey and o_orderstatus = 'F' and l1.l_receiptdate > l1.l_commitdate and exists (  select  *  from  lineitem l2  where  l2.l_orderkey = l1.l_orderkey  and l2.l_suppkey <> l1.l_suppkey ) and not exists (  select  *  from  lineitem l3  where  l3.l_orderkey = l1.l_orderkey  and l3.l_suppkey <> l1.l_suppkey  and l3.l_receiptdate > l3.l_commitdate ) and s_nationkey = n_nationkey and n_name = 'GERMANY' group by s_name order by numwait desc, s_name LIMIT 100;",
+        "pred_sql": "SELECT s.s_name, COUNT(*) AS numwait FROM SUPPLIER s JOIN LINEITEM l1 ON s.s_suppkey = l1.l_suppkey JOIN ORDERS o ON o.o_orderkey = l1.l_orderkey JOIN NATION n ON s.s_nationkey = n.n_nationkey WHERE o.o_orderstatus = 'F'   AND l1.l_receiptdate > l1.l_commitdate   AND EXISTS (     SELECT 1     FROM LINEITEM l2     WHERE l2.l_orderkey = l1.l_orderkey       AND l2.l_suppkey <> l1.l_suppkey   )   AND NOT EXISTS (     SELECT 1     FROM LINEITEM l3     WHERE l3.l_orderkey = l1.l_orderkey       AND l3.l_suppkey <> l1.l_suppkey       AND l3.l_receiptdate > l3.l_commitdate   )   AND n.n_name = 'GERMANY' GROUP BY s.s_name ORDER BY numwait DESC, s.s_name LIMIT 100;",
+        "score": 1
+    },
+    {
+        "sample_id": "q212",
+        "db_id": "tpch",
+        "gold_sql": "select s_name, count(*) as numwait from supplier, lineitem l1, orders, nation where s_suppkey = l1.l_suppkey and o_orderkey = l1.l_orderkey and o_orderstatus = 'F' and l1.l_receiptdate > l1.l_commitdate and exists (  select  *  from  lineitem l2  where  l2.l_orderkey = l1.l_orderkey  and l2.l_suppkey <> l1.l_suppkey ) and not exists (  select  *  from  lineitem l3  where  l3.l_orderkey = l1.l_orderkey  and l3.l_suppkey <> l1.l_suppkey  and l3.l_receiptdate > l3.l_commitdate ) and s_nationkey = n_nationkey and n_name = 'SAUDI ARABIA' group by s_name order by numwait desc, s_name LIMIT 100;",
+        "pred_sql": "SELECT s.s_name, COUNT(*) AS numwait FROM SUPPLIER s JOIN LINEITEM l1 ON s.s_suppkey = l1.l_suppkey JOIN ORDERS o ON o.o_orderkey = l1.l_orderkey JOIN NATION n ON s.s_nationkey = n.n_nationkey WHERE o.o_orderstatus = 'F'   AND l1.l_receiptdate > l1.l_commitdate   AND EXISTS (     SELECT 1     FROM LINEITEM l2     WHERE l2.l_orderkey = l1.l_orderkey       AND l2.l_suppkey <> l1.l_suppkey   )   AND NOT EXISTS (     SELECT 1     FROM LINEITEM l3     WHERE l3.l_orderkey = l1.l_orderkey       AND l3.l_suppkey <> l1.l_suppkey       AND l3.l_receiptdate > l3.l_commitdate   )   AND n.n_name = 'SAUDI ARABIA' GROUP BY s.s_name ORDER BY numwait DESC, s.s_name LIMIT 100;",
+        "score": 1
+    },
+    {
+        "sample_id": "q213",
+        "db_id": "tpch",
+        "gold_sql": "select s_name, count(*) as numwait from supplier, lineitem l1, orders, nation where s_suppkey = l1.l_suppkey and o_orderkey = l1.l_orderkey and o_orderstatus = 'F' and l1.l_receiptdate > l1.l_commitdate and exists (  select  *  from  lineitem l2  where  l2.l_orderkey = l1.l_orderkey  and l2.l_suppkey <> l1.l_suppkey ) and not exists (  select  *  from  lineitem l3  where  l3.l_orderkey = l1.l_orderkey  and l3.l_suppkey <> l1.l_suppkey  and l3.l_receiptdate > l3.l_commitdate ) and s_nationkey = n_nationkey and n_name = 'UNITED STATES' group by s_name order by numwait desc, s_name LIMIT 100;",
+        "pred_sql": "SELECT s.s_name, COUNT(*) AS numwait FROM SUPPLIER s JOIN LINEITEM l1 ON s.s_suppkey = l1.l_suppkey JOIN ORDERS o ON o.o_orderkey = l1.l_orderkey JOIN NATION n ON s.s_nationkey = n.n_nationkey WHERE o.o_orderstatus = 'F'   AND l1.l_receiptdate > l1.l_commitdate   AND EXISTS (     SELECT 1     FROM LINEITEM l2     WHERE l2.l_orderkey = l1.l_orderkey       AND l2.l_suppkey <> l1.l_suppkey   )   AND NOT EXISTS (     SELECT 1     FROM LINEITEM l3     WHERE l3.l_orderkey = l1.l_orderkey       AND l3.l_suppkey <> l1.l_suppkey       AND l3.l_receiptdate > l3.l_commitdate   )   AND n.n_name = 'UNITED STATES' GROUP BY s.s_name ORDER BY numwait DESC, s.s_name LIMIT 100;",
+        "score": 1
+    }
+]
