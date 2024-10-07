@@ -158,6 +158,7 @@ dependencies = [
     { name = "langchain-openai" },
     { name = "matplotlib" },
     { name = "nltk" },
+    { name = "openpyxl" },
     { name = "pandas" },
     { name = "protobuf" },
     { name = "python-dotenv" },
@@ -187,6 +188,7 @@ requires-dist = [
     { name = "langchain-openai", specifier = ">=0.1.23" },
     { name = "matplotlib", specifier = ">=3.9.2" },
     { name = "nltk", specifier = ">=3.9.1" },
+    { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.2.2" },
     { name = "protobuf", specifier = "<=5.0.0" },
     { name = "python-dotenv", specifier = ">=1.0.1" },
@@ -507,6 +509,15 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/a8/3a/4985457f69a8b53e0f4ef7975cb34751090e190b3b06f98151d8f1bfe783/duckdb-1.1.1-cp313-cp313-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:8220f039c5ea06dc126232464ab9b77197f80ae53d4611b0a41f73c54f6f3931", size = 18281329 },
     { url = "https://files.pythonhosted.org/packages/7e/de/c1158577483e3a09ed03bd4e4bc7398eb192a2832fd1de25d3f3c900317b/duckdb-1.1.1-cp313-cp313-musllinux_1_2_x86_64.whl", hash = "sha256:07384414ceae585d4106a7dc154331ae42f45390ed675ec81e3d01f2252a6b01", size = 21606741 },
     { url = "https://files.pythonhosted.org/packages/6b/3d/f6dbb041d5851d47aede54c0741b4a2212d400fd7193c9ffdb79c9262027/duckdb-1.1.1-cp313-cp313-win_amd64.whl", hash = "sha256:82776b3999e71a962db0bdc3f0258407ef41453f63eb47c33da29b644f8eb530", size = 10948555 },
+]
+
+[[package]]
+name = "et-xmlfile"
+version = "1.1.0"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/3d/5d/0413a31d184a20c763ad741cc7852a659bf15094c24840c5bdd1754765cd/et_xmlfile-1.1.0.tar.gz", hash = "sha256:8eb9e2bc2f8c97e37a2dc85a09ecdcdec9d8a396530a6d5a33b30b9a92da0c5c", size = 3218 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/96/c2/3dd434b0108730014f1b96fd286040dc3bcb70066346f7e01ec2ac95865f/et_xmlfile-1.1.0-py3-none-any.whl", hash = "sha256:a2ba85d1d6a74ef63837eed693bcb89c3f752169b0e3e7ae5b16ca5e1b3deada", size = 4688 },
 ]
 
 [[package]]
@@ -1647,6 +1658,18 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/29/5b/82fc157c6d196ff749c3fcc1763868daa26117ff72e06ae025c33eceeaa6/openai-1.50.0.tar.gz", hash = "sha256:fc774e36ad96839b9fc14f1097093527b8abd1348ed824e25818309820afa344", size = 303932 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/73/0b/853e5b3ac95a110a49946ed62eb63282250dec0195d2ea51a3f5044e2bea/openai-1.50.0-py3-none-any.whl", hash = "sha256:8545b3e37aa28a39e5177adbb6142f3e2b2b9e2889ae002c0ba785d917e466e2", size = 378939 },
+]
+
+[[package]]
+name = "openpyxl"
+version = "3.1.5"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "et-xmlfile" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/3d/f9/88d94a75de065ea32619465d2f77b29a0469500e99012523b91cc4141cd1/openpyxl-3.1.5.tar.gz", hash = "sha256:cf0e3cf56142039133628b5acffe8ef0c12bc902d2aadd3e0fe5878dc08d1050", size = 186464 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/c0/da/977ded879c29cbd04de313843e76868e6e13408a94ed6b987245dc7c8506/openpyxl-3.1.5-py2.py3-none-any.whl", hash = "sha256:5282c12b107bffeef825f4617dc029afaf41d0ea60823bbb665ef3079dc79de2", size = 250910 },
 ]
 
 [[package]]
