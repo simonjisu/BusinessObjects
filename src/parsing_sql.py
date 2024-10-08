@@ -515,7 +515,11 @@ def is_aggregate_function(token):
 # Extracting Conditions
 # --------------------------------------------------------------------------------------------
 
-def extract_condition(statement: Statement):
+def extract_condition(
+        statement: Statement, 
+        aliases: dict[str, dict[str, str]], 
+        schema: Schema
+    ) -> tuple[set, set]:
     """
     Extracts following information that used in the WHERE and HAVING clause.
     (1) the number of conditions used
@@ -534,6 +538,7 @@ def extract_condition(statement: Statement):
     for stmt in statements:
         extract_where_having(stmt, conditions, ControlFlow())
         extract_operation_types(conditions, operator_types)
+    conditions = formating_conditions(conditions, aliases, schema)
     conditions = [sqlparse.format(str(c), reindent=True).strip() for c in conditions]
     conditions = set(sorted(conditions))
     return conditions, operator_types
@@ -625,6 +630,23 @@ def extract_operation_types(conditions: list, operator_types: set):
             if op:
                 ops.append(op)
         operator_types.add(' '.join(ops))
+
+def formating_conditions(
+        conditions: list[Comparison], 
+        aliases: dict[str, dict[str, str]],
+        schema: Schema
+    ) -> list[str]:
+    conditions_str = []
+    for cs in conditions:
+        token_list = []
+        for token in cs:
+            if isinstance(token, Identifier):
+                token_list.append(get_full_column_name(token, aliases, schema))
+            else:
+                token_list.append(str(token))
+        conditions_str.append(''.join(token_list))
+    return conditions_str
+
 
 # --------------------------------------------------------------------------------------------
 # Extracting Aggregations

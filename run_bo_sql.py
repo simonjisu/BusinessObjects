@@ -1,6 +1,7 @@
 import json
 import pandas as pd
 from typing import Optional
+from itertools import pairwise
 
 from src.spider_sparc_preprocess import process_all_tables
 from pathlib import Path
@@ -20,177 +21,27 @@ from langchain_core.prompts import PromptTemplate
 _ = load_dotenv(find_dotenv())
 proj_path = Path('.').resolve()
 
-# ----------------------------------------------
-def predict_sql(
-        samples: list[SpiderSample], 
-        spider_tables: dict[str, DatabaseModel], 
-        chain: RunnableSequence, 
-        task: str, 
-        k: int = 500, 
-        file_name: str = 'full_sql_output',
-        vectorstore: Optional[FAISS] = None,
-        n_retrieval: int = 1,
-        score_threshold: float = 0.65,
-    ) -> list[dict]:
-    # check index exists, then start from the last index
-    check_files = list((proj_path / 'experiments' / task).glob(f'{file_name}_*.jsonl'))
-    check_ids = [int(x.stem.split('_')[-1]) for x in check_files]
-    if len(check_ids) > 0:
-        i = (max(check_ids)+1) * k
-        samples = samples[i:]
-    else:
-        i = 0
-    
-    all_outputs = list()
-    for i, data in tqdm(enumerate(samples, i), total=len(samples)):
-        db_schema = get_schema_str(
-            schema=spider_tables[data.db_id].db_schema, 
-            foreign_keys=spider_tables[data.db_id].foreign_keys,
-            col_explanation=spider_tables[data.db_id].col_explanation
-        )
-        final_output = {}
-        if task == 'sql_gen_zero_shot':
-            input_data = {'schema': db_schema, 'input_query': data.final.question}
-        elif 'bo_desc_gen' in task:
-            input_data = {'schema': db_schema, 'virtual_table': data.bo.virtual_table}
-        elif 'sql_gen_hint' in task:
-            # name hint: 'sql_gen_hint_top{n_retrieval}_[low/mid/high or 1/2/3+]_[desc/descvt]'
-            assert vectorstore is not None, 'vectorstore is required for hint generation task.'
-            assert len(task.split('_')) == 6, f'Invalid task - {task} name hint: sql_gen_hint_top{n_retrieval}_[low/mid/high or 1/2/3+]_[desc/descvt]"'
-            hint_type = task.split('_')[-1]
-            filter_type = task.split('_')[-2]
-            assert filter_type in ['low', 'mid', 'high', '1', '2', '3+'], f'Invalid filter type: {filter_type}'
-            assert hint_type in ['desc', 'descvt'], f'Invalid hint type: {hint_type}'
+def filter_by_pm_score(x: pd.Series, df_pm_stats: pd.DataFrame, percentile: int):
+    rank_criteria = df_pm_stats.loc[x['db_id'], f'{percentile}%']
+    return x['pm_score_rank'] < rank_criteria
 
-            retriever = vectorstore.as_retriever(
-                search_kwargs={'k': n_retrieval, 'score_threshold': score_threshold, 'filter': {'level': filter_type, 'db_id': data.db_id}}
-            )
-            docs = retriever.invoke(data.final.question)
-            hint = ''
-            if len(docs) != 0:
-                if hint_type == 'desc':
-                    hint += 'Descriptions:\n'
-                    hint += json.dumps({j: doc.page_content for j, doc in enumerate(docs)}, indent=4)
-                elif hint_type == 'descvt':
-                    hint += 'Descriptions and Virtual Tables:\n'
-                    hint += json.dumps({j: {'description': doc.page_content, 'virtual_table': doc.metadata['virtual_table']} for j, doc in enumerate(docs)}, indent=4)
-            hint += '\n'
-            input_data = {'schema': db_schema, 'input_query': data.final.question, 'hint': hint}
-        else:
-            raise ValueError(f'Invalid task: {task}')
-        
-        output = chain.invoke(input=input_data)
+def get_vector_store(proj_path, percentile: Optional[str]=''):
+    df_train = pd.read_csv(proj_path / 'data' / 'split_in_domain' / f'spider_bo_desc_train.csv')
+    if percentile:
+        df_pm_stats = df_train.groupby(['db_id'])['pm_score_rank'].describe().loc[:, ['25%', '50%', '75%']]
+        pm_idx = df_train.apply(lambda x: filter_by_pm_score(x, df_pm_stats, percentile), axis=1)
+        df_train = df_train.loc[pm_idx].reset_index(drop=True)
 
-        final_output['sample_id'] = data.sample_id
-        final_output['db_id'] = data.db_id
-        final_output['question'] = data.final.question
-        final_output['rationale'] = output.rationale
-        final_output['gold_sql'] = data.final.sql
-        final_output['source_tables'] = data.final.source_tables
-
-        if task == 'sql_gen_zero_shot':
-            final_output['pred_sql'] = output.output
-        elif 'bo_desc_gen' in task:
-            final_output['description'] = output.output
-            final_output['virtual_table'] = data.bo.virtual_table
-        elif 'sql_gen_hint' in task:
-            final_output['pred_sql'] = output.output
-            final_output['hint'] = input_data['hint']
-        else:
-            raise ValueError(f'Invalid task: {task}')
-        all_outputs.append(final_output)
-
-        if len(all_outputs) == k:
-            with open(proj_path / 'experiments' / task / f'{file_name}_{i//k}.jsonl', 'w') as f:
-                for d in all_outputs:
-                    f.write(json.dumps(d) + '\n')
-            all_outputs = list()
-
-    if len(all_outputs) > 0:
-        with open(proj_path / 'experiments' / task / f'{file_name}_{i//k}.jsonl', 'w') as f:
-            for d in all_outputs:
-                f.write(json.dumps(d) + '\n')
-
-def get_bo_sample_data(df):
-    data = []
-    for i, row in df.iterrows():
-        sample = SpiderSample(
-            sample_id=row['sample_id'],
-            db_id=row['db_id'],
-            final=QuestionSQL(
-                question=row['question'],
-                sql=row['gold_sql'],
-                source_tables=eval(row['source_tables']),
-            ),
-            bo=BusinessObject(
-                obj_id=row['sample_id'],
-                virtual_table=row['virtual_table'],
-                description='' if row.get('description') is None else row['description']
-            )
-        )
-        data.append(sample)
-    return data
-
-def run_bo_sql_gen(
-        proj_path, task, spider_tables, chain, type_exp,
-        vectorstore: FAISS, n_retrieval: int = 3, score_threshold: float = 0.65
-    ):
-    df = pd.read_csv(proj_path / 'data' / 'spilt_in_domain' / f'spider_bo_desc{type_exp}.csv')
-    samples = get_bo_sample_data(df)
-    predict_sql(samples, spider_tables, chain, task, 
-                k=100, 
-                file_name=f'bo_sql_output{type_exp}',
-                vectorstore=vectorstore,
-                n_retrieval=n_retrieval,
-                score_threshold=score_threshold)
-
-    bos = []
-    for p in sorted((proj_path / 'experiments' / task).glob(f'bo_sql_output{type_exp}_*.jsonl'), key=lambda x: int(x.stem.split('_')[-1])):
-        with p.open() as f:
-            for line in f:
-                bos.append(json.loads(line))
-
-    with (proj_path / 'experiments' / f'{task}.jsonl').open('w') as f:
-        for bo in bos:
-            f.write(json.dumps(bo) + '\n')
-
-def get_vector_store(proj_path, typ):
-    df_train = pd.read_csv(proj_path / 'data' / 'spilt_in_domain' / f'spider_bo_desc{typ}_train.csv')
     documents = []
     for i, row in df_train.iterrows():
-        if typ == '_c':
-            if row['need_low|wrong']:
-                level = 'low'
-            elif row['need_mid|wrong']:
-                level = 'mid'
-            elif row['need_high|wrong']:
-                level = 'high'
-            else:
-                raise ValueError('The complexity level is not defined.')
-        elif typ == '_t':
-            if row['need_1|wrong']:
-                level = '1'
-            elif row['need_2|wrong']:
-                level = '2'
-            elif row['need_3+|wrong']:
-                level = '3+'
-            else:
-                raise ValueError('The complexity level is not defined.')
-        else:
-            raise ValueError('Invalid type (`typ`)')
-
         doc = Document(
             doc_id=row['sample_id'],
             page_content=row['description'],
             metadata={
                 'sample_id': row['sample_id'],
                 'db_id': row['db_id'],
-                'question': row['question'],
-                'gold_sql': row['gold_sql'],
-                'source_tables': row['source_tables'],
+                'cate_gold_c': row['cate_gold_c'],
                 'cate_len_tbls': row['cate_len_tbls'],
-                'gold_c': row['gold_c'],
-                'level': level,
                 'virtual_table': row['virtual_table']
             }
         )
@@ -202,7 +53,6 @@ def get_vector_store(proj_path, typ):
         embedding = embeddings_model,
         distance_strategy = DistanceStrategy.EUCLIDEAN_DISTANCE
     )
-
     return vectorstore
 
 
@@ -251,10 +101,13 @@ model = model_openai.with_structured_output(Response)
 chain = (prompt | model)
 
 # -----------------------------------------------------------------
-typ = '_c'  # '_t', '_c'
-score_threshold = 0.65
-iterator = ['low', 'mid', 'high'] if typ == '_c' else ['1', '2', '3+']
+n_retrieval = 3  # 1, 3 
+score_threshold = 0.60
+exp_name = 'test_exp2' # test_exp1, test_exp2
+percentile = 50  # 25, 50, 75, None(=100%)
 # -----------------------------------------------------------------
+if not (proj_path / 'experiments' / exp_name).exists():
+    (proj_path / 'experiments' / exp_name).mkdir(parents=True)
 
 with (proj_path / 'data' / 'spider' / f'tables.json').open() as f:
     tables = json.load(f)
@@ -263,24 +116,65 @@ with (proj_path / 'data' / 'description.json').open() as f:
     all_descriptions = json.load(f)
 
 spider_tables = process_all_tables(tables, descriptions=all_descriptions)
-vectorstore = get_vector_store(proj_path, typ)
+vectorstore = get_vector_store(proj_path, percentile=percentile)
 
-for typ2 in ['desc', 'descvt']:
-    for n_retrieval in [1, 3]:
-        for level in iterator:
-            # ----------------------------------------------
-            if typ2 == 'desc' or n_retrieval == 1:
-                continue
-            # ----------------------------------------------
-            task = f'sql_gen_hint_top{n_retrieval}_{level}_{typ2}'
-            print(task)
-            # name hint: 'sql_gen_hint_top{n_retrieval}_[low/mid/high or 1/2/3+]_[desc/descvt]'
-            if not (proj_path / 'experiments' / task).exists():
-                (proj_path / 'experiments' / task).mkdir()
-            run_bo_sql_gen(
-                proj_path, task, spider_tables, chain, 
-                type_exp=f'{typ}_test',
-                vectorstore=vectorstore,
-                n_retrieval=n_retrieval,
-                score_threshold=score_threshold
-            )
+final_outputs = []
+df_test = pd.read_csv(proj_path / 'data' / 'split_in_domain' / 'test.csv')
+df_test.reset_index(drop=True, inplace=True)
+
+# restart from checkpoint
+if list((proj_path / 'experiments' / exp_name).glob('*.json')) != []:
+    row_index = [int(file.stem.split('_')[-1]) for file in sorted(list((proj_path / 'experiments' / exp_name).glob('*.json')))]
+    df_test = df_test.iloc[row_index[-1]:]
+    final_outputs = json.load((proj_path / 'experiments' / exp_name / f'{df_test.iloc[0]["sample_id"]}_{row_index[-1]}.json').open())
+
+iterator = tqdm(df_test.iterrows(), total=len(df_test))
+for i, row in iterator:
+    o = {'sample_id': row['sample_id']}
+
+    db_schema = get_schema_str(
+        schema=spider_tables[row['db_id']].db_schema, 
+        foreign_keys=spider_tables[row['db_id']].foreign_keys,
+        col_explanation=spider_tables[row['db_id']].col_explanation
+    )
+    
+    # Experiment Complexity: low, mid, high
+    iterator.set_description(f"Processing {row['sample_id']}: Complexity - low, mid, high")
+    filter_key = 'cate_gold_c'
+    for filter_value in ['low', 'mid', 'high']:
+        retriever = vectorstore.as_retriever(
+            search_kwargs={'k': n_retrieval, 'score_threshold': score_threshold, 'filter': {filter_key: filter_value, 'db_id': row['db_id']}}
+        )
+        docs = retriever.invoke(row['question'])
+        hint = 'Descriptions and Virtual Tables:\n'
+        hint += json.dumps({j: {'description': doc.page_content, 'virtual_table': doc.metadata['virtual_table']} for j, doc in enumerate(docs)}, indent=4)
+        hint += '\n'
+        input_data = {'schema': db_schema, 'input_query': row['question'], 'hint': hint}
+        output = chain.invoke(input=input_data)
+
+        o[f'c_{filter_value}'] = output.output
+        o[f'c_{filter_value}_hint'] = hint
+
+    # Experiment Complexity: 1, 2, 3+
+    iterator.set_description(f"Processing {row['sample_id']}: Complexity - 1, 2, 3+")
+    filter_key = 'cate_len_tbls'
+    for filter_value in ['1', '2', '3+']:
+        retriever = vectorstore.as_retriever(
+            search_kwargs={'k': n_retrieval, 'score_threshold': score_threshold, 'filter': {filter_key: filter_value, 'db_id': row['db_id']}}
+        )
+        docs = retriever.invoke(row['question'])
+        hint = 'Descriptions and Virtual Tables:\n'
+        hint += json.dumps({j: {'description': doc.page_content, 'virtual_table': doc.metadata['virtual_table']} for j, doc in enumerate(docs)}, indent=4)
+        hint += '\n'
+        input_data = {'schema': db_schema, 'input_query': row['question'], 'hint': hint}
+        output = chain.invoke(input=input_data)
+
+        o[f't_{filter_value}'] = output.output
+        o[f't_{filter_value}_hint'] = hint
+    final_outputs.append(o)
+
+    if i % 100 == 0:
+        with (proj_path / 'experiments' / exp_name / f'{row["sample_id"]}_{i}.json').open('w') as f:
+            json.dump(final_outputs, f, indent=4)
+    
+df_final = pd.DataFrame(final_outputs).to_csv(proj_path / 'experiments' / 'bo_evals' / f'{exp_name}.csv', index=False)

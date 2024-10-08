@@ -1,0 +1,17 @@
+[
+    {
+        "sample_id": "train.1",
+        "c_low": "SELECT name, born_state, age FROM head ORDER BY age;",
+        "c_low_hint": "Descriptions and Virtual Tables:\n{\n    \"0\": {\n        \"description\": \"This virtual table provides the count of department heads from the 'head' table who are older than a specified age. The placeholder in the WHERE clause represents the age threshold.\",\n        \"virtual_table\": \"SELECT count(*) FROM head WHERE age  >  [PLACEHOLDER-TYPE:NUMBER]\"\n    },\n    \"1\": {\n        \"description\": \"This virtual table describes the names of department heads from the 'head' table who were not born in a specific state. The placeholder in the WHERE clause represents the state name that is being excluded.\",\n        \"virtual_table\": \"SELECT name FROM head WHERE born_state != [PLACEHOLDER-TYPE:STRING]\"\n    }\n}\n",
+        "c_mid": "SELECT head.name, head.born_state, head.age FROM head ORDER BY head.age;",
+        "c_mid_hint": "Descriptions and Virtual Tables:\n{}\n",
+        "c_high": "SELECT h.name, h.born_state, h.age FROM head h ORDER BY h.age;",
+        "c_high_hint": "Descriptions and Virtual Tables:\n{\n    \"0\": {\n        \"description\": \"This virtual table provides the states of birth for department heads from the 'head' table, grouped by state. The placeholder in the HAVING clause represents the minimum count of department heads required for a state to be included in the results.\",\n        \"virtual_table\": \"SELECT born_state FROM head GROUP BY born_state HAVING count(*)  >=  [PLACEHOLDER-TYPE:NUMBER]\"\n    }\n}\n",
+        "t_1": "SELECT name, born_state, age FROM head ORDER BY age;",
+        "t_1_hint": "Descriptions and Virtual Tables:\n{\n    \"0\": {\n        \"description\": \"This virtual table provides the count of department heads from the 'head' table who are older than a specified age. The placeholder in the WHERE clause represents the age threshold.\",\n        \"virtual_table\": \"SELECT count(*) FROM head WHERE age  >  [PLACEHOLDER-TYPE:NUMBER]\"\n    },\n    \"1\": {\n        \"description\": \"This virtual table provides the states of birth for department heads from the 'head' table, grouped by state. The placeholder in the HAVING clause represents the minimum count of department heads required for a state to be included in the results.\",\n        \"virtual_table\": \"SELECT born_state FROM head GROUP BY born_state HAVING count(*)  >=  [PLACEHOLDER-TYPE:NUMBER]\"\n    },\n    \"2\": {\n        \"description\": \"This virtual table describes the names of department heads from the 'head' table who were not born in a specific state. The placeholder in the WHERE clause represents the state name that is being excluded.\",\n        \"virtual_table\": \"SELECT name FROM head WHERE born_state != [PLACEHOLDER-TYPE:STRING]\"\n    }\n}\n",
+        "t_2": "SELECT head.name, head.born_state, head.age FROM head ORDER BY head.age;",
+        "t_2_hint": "Descriptions and Virtual Tables:\n{}\n",
+        "t_3+": "SELECT head.name, head.born_state, head.age FROM head ORDER BY head.age;",
+        "t_3+_hint": "Descriptions and Virtual Tables:\n{}\n"
+    }
+]
