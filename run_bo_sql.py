@@ -25,9 +25,9 @@ def filter_by_pm_score(x: pd.Series, df_pm_stats: pd.DataFrame, percentile: int)
     rank_criteria = df_pm_stats.loc[x['db_id'], f'{percentile}%']
     return x['pm_score_rank'] < rank_criteria
 
-def get_vector_store(proj_path, percentile: Optional[str]=''):
+def get_vector_store(proj_path, percentile: Optional[int]=100):
     df_train = pd.read_csv(proj_path / 'data' / 'split_in_domain' / f'spider_bo_desc_train.csv')
-    if percentile:
+    if percentile in [25, 50, 75]:
         df_pm_stats = df_train.groupby(['db_id'])['pm_score_rank'].describe().loc[:, ['25%', '50%', '75%']]
         pm_idx = df_train.apply(lambda x: filter_by_pm_score(x, df_pm_stats, percentile), axis=1)
         df_train = df_train.loc[pm_idx].reset_index(drop=True)
@@ -103,9 +103,12 @@ chain = (prompt | model)
 # -----------------------------------------------------------------
 n_retrieval = 3  # 1, 3 
 score_threshold = 0.60
-exp_name = 'test_exp2' # test_exp1, test_exp2
-percentile = 50  # 25, 50, 75, None(=100%)
+percentile = 25  # 25, 50, 75, any other will not call this filter
 # -----------------------------------------------------------------
+if percentile in [25, 50, 75]:
+    exp_name = f'test_exp2_{percentile}'
+else:
+    exp_name = 'test_exp1'
 if not (proj_path / 'experiments' / exp_name).exists():
     (proj_path / 'experiments' / exp_name).mkdir(parents=True)
 
