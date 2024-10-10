@@ -1,1 +1,1 @@
-# Business Objects
+# Business Objects: A Practical Data-Centric AI Approach to Improving Usability of NL2SQL for Enterprises
