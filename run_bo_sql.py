@@ -103,7 +103,7 @@ chain = (prompt | model)
 # -----------------------------------------------------------------
 n_retrieval = 3  # 1, 3 
 score_threshold = 0.60
-percentile = 25  # 25, 50, 75, any other will not call this filter
+percentile = 50  # 25, 50, 75, any other will not call this filter
 # -----------------------------------------------------------------
 if percentile in [25, 50, 75]:
     exp_name = f'test_exp2_{percentile}'
@@ -127,7 +127,7 @@ df_test.reset_index(drop=True, inplace=True)
 
 # restart from checkpoint
 if list((proj_path / 'experiments' / exp_name).glob('*.json')) != []:
-    row_index = [int(file.stem.split('_')[-1]) for file in sorted(list((proj_path / 'experiments' / exp_name).glob('*.json')))]
+    row_index = sorted([int(file.stem.split('_')[-1]) for file in sorted(list((proj_path / 'experiments' / exp_name).glob('*.json')))])
     df_test = df_test.iloc[row_index[-1]:]
     final_outputs = json.load((proj_path / 'experiments' / exp_name / f'{df_test.iloc[0]["sample_id"]}_{row_index[-1]}.json').open())
 
