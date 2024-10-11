@@ -111,7 +111,7 @@ def select_questions(root_path, question_path, bo_path, ref_query="all"):
         testNLsamples = testNLsamples.to_dict('records')
         return testNLsamples
 
-def create_bo_store(root_path, bo_path, basic_bo=False):
+def create_bo_store(root_path, bo_path, general_bo=False):
     # get business object
     with open(bo_path, 'r') as f:
         bos = json.load(f)
@@ -125,8 +125,8 @@ def create_bo_store(root_path, bo_path, basic_bo=False):
         bos_dict[ref_id].append(bo)
     
     # create vector store
-    if basic_bo:
-        store_name = "bo_store_basic"
+    if general_bo:
+        store_name = "bo_store_general"
     else:
         store_name = "bo_store_full"
     vector_store = Chroma(
@@ -623,9 +623,10 @@ def parse_args():
     parser.add_argument("--question_path", default="data/tpch/questions.json", type=str)
     parser.add_argument("--bo_path", default="data/tpch/business_objects.json", type=str)
     parser.add_argument("--llm", default="gpt-4o-mini", type=str)
-    parser.add_argument("--ref_query", default="q1", type=str)
+    parser.add_argument("--ref_query", default="q1", type=str, 
+                        help="The TPC-H query to work on, 'all' for all queries")
     parser.add_argument("--option", default=0, type=int, 
-                        help="0: only schema, 1: with business abstract, 2: with BO FULL, 3: with BO Basic")
+                        help="0: only schema, 1: with business abstract, 2: with Specific BO, 3: with General BO")
     return parser.parse_args()
 
 from datetime import datetime
@@ -648,7 +649,8 @@ if __name__ == "__main__":
     elif "gemini-" in args.llm:
         # init project
         import vertexai
-        vertexai.init(project="crypto-isotope-366706", location="us-central1")
+        VERTEXAI_PROJECT_NAME = os.environ.get("VERTEXAI_PROJECT_NAME")
+        vertexai.init(project=VERTEXAI_PROJECT_NAME, location="us-central1")
         # init llm
         gemini_llm = ChatVertexAI(
             model=args.llm,
@@ -663,9 +665,9 @@ if __name__ == "__main__":
     # read questions and business objects
     NLsamples = select_questions(args.root_path, args.question_path, args.bo_path, args.ref_query)
     if args.option == 2:
-        bo_store = create_bo_store(args.root_path, args.bo_path, basic_bo=False)
+        bo_store = create_bo_store(args.root_path, args.bo_path, general_bo=False)
     elif args.option == 3:
-        bo_store = create_bo_store(args.root_path, args.bo_path, basic_bo=True)
+        bo_store = create_bo_store(args.root_path, args.bo_path, general_bo=True)
     
     if "o1" in args.llm:
         all_sql_generation = sql_generation_o1(args.llm, NLsamples, bo_store, args.option)
