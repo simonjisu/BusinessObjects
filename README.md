@@ -144,3 +144,6 @@ $ python eval_tpch.py \
 
 Check the code for preliminary study with TPC-H in `eval_tpch.py`. Please check our paper for more details explanation.
 
+### TPC-H Preliminary Study Error Study
+
+<image src="./figs/preliminary_error_analysis.png">
