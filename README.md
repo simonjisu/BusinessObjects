@@ -123,7 +123,7 @@ $ python run_bo_sql.py \
 * **task**: run as following procedure (1) `zero_shot_hint` and (2) `bo_eval`.
 * **percentile**: Filter by the ranking of percentile of partial matching score in train set: 25, 50, 75, any other will not call this filter.
 
-Check the code for the analysis of the zero-shot inference with BOs results in `result_analysis.ipynb`. Please check our paper for more details explanation.
+Check the code for the analysis of the zero-shot inference with BOs results in `analysis_bo.py`. Please check our paper for more details explanation.
 
 ### Comparison of Execution Accuracy in the test set by Retrieval Augmented Generation and the Number of BOs
 
