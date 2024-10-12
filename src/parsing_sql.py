@@ -1,7 +1,7 @@
 import sqlparse
 from sqlparse.sql import (
     Token, TokenList, IdentifierList, Identifier, Function, Statement, Parenthesis, Operation,
-    Where, Having, Comparison
+    Where, Comparison
 )
 import sqlparse.tokens as tks
 from typing import Callable

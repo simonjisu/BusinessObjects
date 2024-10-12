@@ -62,5 +62,5 @@ if __name__ == '__main__':
     db_path = proj_path / 'db'
 
     create_db_and_load_data(db_path)
-    # get_answers(db_path)
-    # create_data_dictionary(db_path)
+    get_answers(db_path)
+    create_data_dictionary(db_path)

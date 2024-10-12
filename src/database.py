@@ -1,10 +1,9 @@
+import re
+import sqlite3
 import duckdb
+import pandas as pd
 from pathlib import Path
 from typing import Optional
-import re
-from duckdb import ConversionException
-import sqlite3
-import pandas as pd
 
 class Database:
     def __init__(self, db_file: str|Path):

@@ -1,85 +1,18 @@
 import json
+import sqlglot
+import sqlglot.expressions as exp
 from tqdm import tqdm
-from .db_utils import get_schema_str, get_data_dict
-from dotenv import load_dotenv, find_dotenv
 from pathlib import Path
-from pydantic import BaseModel, Field
-# from langchain_core.pydantic_v1 import BaseModel, Field
+from typing import Optional
+from collections import defaultdict
+from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
-from typing import Optional
-from collections import defaultdict
 
-import sqlglot
-import sqlglot.expressions as exp
-from sqlglot.optimizer import optimize
-# https://github.com/tobymao/sqlglot/blob/main/sqlglot/optimizer/optimizer.py
-
-from sqlglot.optimizer.annotate_types import annotate_types
-from sqlglot.optimizer.canonicalize import canonicalize
-from sqlglot.optimizer.eliminate_ctes import eliminate_ctes
-from sqlglot.optimizer.eliminate_joins import eliminate_joins
-from sqlglot.optimizer.eliminate_subqueries import eliminate_subqueries
-from sqlglot.optimizer.merge_subqueries import merge_subqueries
-from sqlglot.optimizer.normalize import normalize
-from sqlglot.optimizer.optimize_joins import optimize_joins
-from sqlglot.optimizer.pushdown_predicates import pushdown_predicates
-from sqlglot.optimizer.pushdown_projections import pushdown_projections
-from sqlglot.optimizer.qualify import qualify
-from sqlglot.optimizer.qualify_columns import quote_identifiers
-from sqlglot.optimizer.simplify import simplify
-from sqlglot.optimizer.unnest_subqueries import unnest_subqueries
-from sqlglot.schema import ensure_schema
-
-RULES = (
-    # qualify,
-    # pushdown_projections,
-    # normalize,
-    # unnest_subqueries,
-    # pushdown_predicates,
-    # optimize_joins,
-    # eliminate_subqueries,
-    # merge_subqueries,
-    # # eliminate_joins,
-    # eliminate_ctes,
-    # quote_identifiers,
-    # annotate_types,
-    # canonicalize,
-    # simplify,
-)
-
-
-class DatabaseModel(BaseModel):
-    db_id: str
-    db_schema: dict[str, dict[str, str]]
-    col_explanation: dict[str, dict[str, str]]
-    foreign_keys: list[str]
-    primary_keys: list[str]
-
-class QuestionSQL(BaseModel):
-    question: str
-    sql: str
-    source_tables: list[str] = []
-
-class SparcSample(BaseModel):
-    sample_id: int = -1
-    db_id: str
-    interactions: list[QuestionSQL]
-    final: QuestionSQL
-    
-class BusinessObject(BaseModel):
-    obj_id: str
-    obj_name: Optional[str] = None
-    virtual_table: str
-    description: str
-
-class SpiderSample(BaseModel):
-    sample_id: int|str = None
-    db_id: str
-    final: QuestionSQL
-    bo: Optional[BusinessObject] = None
-
+from .db_utils import get_schema_str, get_data_dict
+from .pymodels import DatabaseModel, QuestionSQL, SparcSample, SpiderSample, Description
+from .prompts import Prompts
 
 def load_spider_sparc_data(data_path: Path, load_test: bool=False) -> tuple:
     with (data_path / f'tables.json').open() as f:
@@ -97,7 +30,6 @@ def load_spider_sparc_data(data_path: Path, load_test: bool=False) -> tuple:
 
 def preprocess_sql(sql: str) -> str:
     return sql.replace('"', "'").strip()
-    # return sql.strip()
 
 def process_all_tables(tables: list, descriptions: Optional[dict[str, dict[str, str]]]=None) -> dict[str, DatabaseModel]:
     database = defaultdict(DatabaseModel)
@@ -145,7 +77,6 @@ def process_samples_sparc(all_data: list[dict], tables: dict[str, DatabaseModel]
             tbls = extract_used_table(sql, schema)
             interactions.append(QuestionSQL(question=x['utterance'], sql=sql, source_tables=tbls))
 
-        
         final_sql = preprocess_sql(data['final']['query'])
         try:
             final_tbls = extract_used_table(final_sql, schema)
@@ -215,30 +146,8 @@ def split_train_dev_test(data_samples: dict, train_ratio: float=0.8, dev_ratio: 
 
 def get_sparc_schema_description(proj_path: Path, sparc_tables: dict) -> dict:
 
-    class Description(BaseModel):
-        output: dict[str, dict[str, str]] = Field(description='Description of each column for all tables in the database')
-
-    template = '''### Task
-    You are tasked with writing one line short description for each column name in a database to help users understand the data better.
-    You will be proveded a schema with table names and column names.
-
-    ### Formatting
-    Your output should be of the following JSON format with `output` key and value as a dictionary of table names and column names with their descriptions.:
-    {{
-        "<table_name1>" : {{
-            "<column_name>": <str: the one line short description of column>,
-            ...
-        }},
-        ...
-    }} 
-
-    ### Output
-    <SCHEMA>:\n{schema}
-    <OUTPUT>: 
-    '''
-
     prompt = PromptTemplate(
-        template=template,
+        template=Prompts.dbschema_description,
         input_variables=['schema']
     )
 

@@ -139,7 +139,7 @@ def create_bo_store(root_path, bo_path, general_bo=False):
     docs = []
     for ref_id in bos_dict.keys():
         bos = bos_dict.get(ref_id)
-        if basic_bo:
+        if not general_bo:
             bos = bos[0:1]
         ba = '\n'.join(bo['business_abstraction'] for bo in bos)
         vt = '\n'.join(bo['virtual_table'] for bo in bos)

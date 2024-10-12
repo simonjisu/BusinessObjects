@@ -5,7 +5,6 @@ from .process_sql import get_schema, Schema
 from .parsing_sql import extract_aliases, extract_selection, extract_condition, extract_aggregation, extract_nested_setoperation, extract_others
 import json
 import sqlparse
-from typing import Optional
 import numpy as np
 import pandas as pd
 
@@ -235,22 +234,6 @@ def load_plus_data(filename: str):
             x = reverse_mapping(json.loads(l))
             data.append(x)
     return data
-
-
-if __name__ == '__main__':
-    with open(proj_path / 'experiments' / 'evals' / 'spider_train_eval.json', 'r') as f:
-        train_output_results = json.load(f)
-
-    with open(proj_path / 'experiments' / 'evals' / 'spider_dev_eval.json', 'r') as f:
-        dev_output_results = json.load(f)
-
-    train_plus = get_output_result_plus(train_output_results, 'spider_train_plus')
-    dev_plus = get_output_result_plus(dev_output_results, 'spider_dev_plus')
-
-    train_plus = load_plus_data('spider_train_plus')
-    dev_plus = load_plus_data('spider_dev_plus')
-
-
 
 
 
