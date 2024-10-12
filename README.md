@@ -33,7 +33,7 @@ data
     ├── gold/
     ├── tables/  # TPC-H tables
     ├── ...
-    └── tpch.db  # after funning `python src/tpch_preprocess.py`
+    └── tpch.db  # after running `python src/tpch_preprocess.py`
 ```
 
 # Codes
@@ -129,4 +129,18 @@ Check the code for the analysis of the zero-shot inference with BOs results in `
 
 <image src="./figs/num_bo.png">
 
+## TPC-H Preliminary Study
+
+```bash
+$ python eval_tpch.py \
+    --llm gpt-4o-mini \
+    --ref_query all \
+    --option 0
+```
+
+* **llm**: The LLM to use, it can be `gpt-4o`, `gpt-4o-mini`, `gemini-1.5-pro`,...
+* **ref_query**: The TPC-H query to work on, 'all' for all queries
+* **option**: 0: database schema only, 1: with business abstract, 2: with Specific BO, 3: with General BO
+
+Check the code for preliminary study with TPC-H in `eval_tpch.py`. Please check our paper for more details explanation.
 

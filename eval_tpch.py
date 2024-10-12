@@ -34,7 +34,6 @@ from langchain_core.documents import Document
 from langchain_chroma import Chroma
 
 from openai import OpenAI
-client = OpenAI(api_key=os.environ.get("OPENAI_O1_KEY"))
 embeddings = OpenAIEmbeddings(model="text-embedding-3-large")
 
 db_path = ''
@@ -280,66 +279,6 @@ def sql_generation(lm_model, testNLsamples, bo_store, option=0):
             logger.info("'{}': {}".format(k,v))
     return all_full_sql
 
-def sql_generation_o1(llm, testNLsamples, bo_store, option=0):
-    prompt = PromptTemplate(
-        template=template_sql_generation,
-        input_variables=['schema', 'question', 'hint']
-    )
-
-    all_full_sql = list()
-    for idx in tqdm(range(len(testNLsamples))):
-        data = testNLsamples[idx]
-        db_id = 'tpc-h'
-        db_schema = get_database_schema(db_path=db_path, tables_list=[])
-        hint = data['hint']
-        if option == 1:
-            hint = 'Please refer to the following business object:\n'+data['bo']
-        elif option >= 2:
-            results = bo_store.similarity_search_with_relevance_scores(
-                data['question'],
-                k=1,
-            )
-            logger.info(f"q_id: {data['instance_id']}, score: {results[0][1]}")
-            if results[0][1] <= 0.4:
-                results = bo_store.similarity_search_with_relevance_scores(
-                    data['question'],
-                    k=3,
-                )
-                bo = ''
-                for res in results:
-                    bo += res[0].page_content + '\n\n'
-            else:
-                bo = results[0][0].page_content
-            hint = 'Please refer to the following business object:\n' + bo
-        formatted_prompt = prompt.format(schema=db_schema, question=data['question'], hint=data['hint'])
-        #print(formatted_prompt)
-        
-        response = client.chat.completions.create(
-            model=llm,
-            messages=[
-                {
-                    "role": "user", 
-                    "content": formatted_prompt
-                }
-            ]
-        )
-        response = response.choices[0].message.content
-        output = parse_json_markdown(response)
-        #print(output)
-        
-        full_sql_output = {}
-        full_sql_output['q_id'] = data['instance_id']
-        full_sql_output['db_id'] = db_id
-        full_sql_output['question'] = data['question']
-        full_sql_output['rationale'] = output['rationale']
-        full_sql_output['sql'] = output['sql']
-        full_sql_output['gold_sql'] = data['gold_sql']
-        full_sql_output['hint'] = hint
-        all_full_sql.append(full_sql_output)
-    for t in all_full_sql:
-        for k, v in t.items():
-            logger.info("'{}': {}".format(k,v))
-    return all_full_sql
 
 def sql_generation_gemini(gemini_model, testNLsamples, bo_store, option=0):
     prompt = ChatPromptTemplate.from_messages(template_sql_generation_gemini)
@@ -617,16 +556,22 @@ def execution_validation(revised_full_sql, output_dir):
 import argparse
 def parse_args():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--root_path", default="data/tpch", type=str)
-    parser.add_argument("--output_dir", default="data/tpch/outputs", type=str)
-    parser.add_argument("--db_path", default="data/tpch/TPC-H.db", type=str)
-    parser.add_argument("--question_path", default="data/tpch/questions.json", type=str)
-    parser.add_argument("--bo_path", default="data/tpch/business_objects.json", type=str)
-    parser.add_argument("--llm", default="gpt-4o-mini", type=str)
+    parser.add_argument("--root_path", default="data/tpch", type=str,
+                       help="The root path of the TPC-H dataset")
+    parser.add_argument("--output_dir", default="data/tpch/outputs", type=str,
+                       help="The path to results output directory")
+    parser.add_argument("--db_path", default="data/tpch/TPC-H.db", type=str,
+                       help="The path to TPC-H database")
+    parser.add_argument("--question_path", default="data/tpch/questions.json", type=str,
+                       help="Path to 71 NL questions for TPC-H")
+    parser.add_argument("--bo_path", default="data/tpch/business_objects.json", type=str,
+                       help="The path to list of BOs for TPC-H")
+    parser.add_argument("--llm", default="gpt-4o-mini", type=str, 
+                        help="The LLM to use, it can be gpt-4o, gpt-4o-mini, gemini-1.5-pro,...")
     parser.add_argument("--ref_query", default="q1", type=str, 
                         help="The TPC-H query to work on, 'all' for all queries")
     parser.add_argument("--option", default=0, type=int, 
-                        help="0: only schema, 1: with business abstract, 2: with Specific BO, 3: with General BO")
+                        help="0: database schema only, 1: with business abstract, 2: with Specific BO, 3: with General BO")
     return parser.parse_args()
 
 from datetime import datetime
@@ -669,10 +614,7 @@ if __name__ == "__main__":
     elif args.option == 3:
         bo_store = create_bo_store(args.root_path, args.bo_path, general_bo=True)
     
-    if "o1" in args.llm:
-        all_sql_generation = sql_generation_o1(args.llm, NLsamples, bo_store, args.option)
-        revised_full_sql = all_sql_generation
-    elif "gemini-" in args.llm:
+    if "gemini-" in args.llm:
         all_sql_generation = sql_generation_gemini(gemini_llm, NLsamples, bo_store, args.option)
         revised_full_sql = sql_revision_gemini(gemini_llm, all_sql_generation)
     elif "gpt-" in args.llm:
