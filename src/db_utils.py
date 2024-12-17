@@ -43,10 +43,17 @@ def get_data_dict(database: dict) -> dict[str, dict|list]:
         data_dict['foreign_keys'].append(fk)
 
     for i in database['primary_keys']:
-        table_index, col_name = database['column_names_original'][i]
-        table_name = database['table_names_original'][table_index]
-        pk = f'{table_name}.{col_name}'
-        data_dict['primary_keys'].append(pk)
+        if isinstance(i, int):
+            table_index, col_name = database['column_names_original'][i]
+            table_name = database['table_names_original'][table_index]
+            pk = f'{table_name}.{col_name}'
+            data_dict['primary_keys'].append(pk)
+        else:
+            for j in i:
+                table_index, col_name = database['column_names_original'][j]
+                table_name = database['table_names_original'][table_index]
+                pk = f'{table_name}.{col_name}'
+            data_dict['primary_keys'].append(pk)
     return data_dict
 
 def get_schema_str(

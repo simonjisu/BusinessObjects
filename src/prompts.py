@@ -4,16 +4,20 @@ You are tasked with writing one line short description for each column name in a
 You will be proveded a schema with table names and column names.
 
 ### Formatting
-Your output should be of the following JSON format with `output` key and value as a dictionary of table names and column names with their descriptions.:
+Your output should be of the following JSON format with `output` as key and value as a dictionary.
+the value dictionary contains a dictionary with table name as key and a dictionary of column names with their descriptions as value.:
 {{
-    "<table_name1>" : {{
-        "<column_name>": <str: the one line short description of column>,
-        ...
-    }},
+    "output": {{
+        "<table_name1>" : {{
+            "<column_name>": <str: the one line short description of column>,
+            ...
+        }},
     ...
-}} 
+    }} 
+}}
 
 ### Output
+<DB_ID>: {db_id}
 <SCHEMA>:\n{schema}
 <OUTPUT>: 
 '''
@@ -38,6 +42,29 @@ Your output should be of the following JSON format:
 <INPUT QUERY>: {input_query}
 <OUTPUT>: 
 '''
+    zero_shot_inference_bird = '''### TASK
+You are tasked with generating a SQL query(in a SQLite Database) according to a user input request.
+You should work in step-by-step reasoning before coming to the full SQL query.
+
+You will be provided an input NL query and an evidence as a hint.
+
+### SCHEMA
+You are working with the following schema in a SQLite Database:
+{schema}
+
+### FORMATTING
+Your output should be of the following JSON format:
+{{
+    "rationale": "<list[str]: the step-by-step reasoning to generate the SQL query>",
+    "full_sql_query": "<str: the full SQL query>"
+}}
+
+### OUTPUT
+<INPUT QUERY>: {input_query}
+<EVIDENCE>: {evidence}
+<OUTPUT>: 
+'''
+
     zero_shot_hints_inference = '''### TASK
 You are tasked with generating a SQL query(in a SQLite Database) according to a user input NL question.
 You should work in step-by-step reasoning before coming to the full SQL query.

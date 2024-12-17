@@ -66,16 +66,29 @@ def switch_control_flow(token, control_flow: ControlFlow):
         control_flow.orderby_seen = False
         control_flow.limit_seen = True
 
-def is_actual_keyword(token):
+# def is_actual_keyword(token):
+#     KEYWORDS = (
+#         'SELECT', 'FROM', 'JOIN', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT',
+#         'UNION', 'INTERSECT', 'EXCEPT', 'AS', 'ON', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL',
+#         'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS', 'NATURAL', 'ASC', 'DESC', 'DISTINCT', 'EXISTS',
+#         'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'ALL', 'ANY', 'WITH'
+#     )
+#     if token.value in KEYWORDS:
+#         return True
+#     return False
+
+def check_keyword_in_token(token):
     KEYWORDS = (
         'SELECT', 'FROM', 'JOIN', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT',
         'UNION', 'INTERSECT', 'EXCEPT', 'AS', 'ON', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL',
         'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS', 'NATURAL', 'ASC', 'DESC', 'DISTINCT', 'EXISTS',
         'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'ALL', 'ANY', 'WITH'
     )
-    if token.value in KEYWORDS:
-        return True
+    for key in KEYWORDS:
+        if key in str(token):
+            return True
     return False
+
 
 def is_pwn(token, only_wn=False):
     if only_wn:
@@ -481,9 +494,13 @@ def extract_columns_from_expression(token, aliases: dict[str, str], schema: Sche
     columns = set()
     # print(token, token.ttype, type(token))
     if isinstance(token, Identifier) or token.ttype is tks.Wildcard:
-        column_name = get_full_column_name(token, aliases, schema)
-        columns.add(column_name)
-        expression.append(column_name)
+        if 'DESC' in str(token):
+            # no column in order by desc
+            expression.append(str(token))
+        else:
+            column_name = get_full_column_name(token, aliases, schema)
+            columns.add(column_name)
+            expression.append(column_name)
     elif isinstance(token, IdentifierList):
         for identifier in token.get_identifiers():
             columns.update(extract_columns_from_expression(identifier, aliases, schema, expression))
@@ -497,7 +514,6 @@ def extract_columns_from_expression(token, aliases: dict[str, str], schema: Sche
     else:
         # Other tokens, possibly operators or literals
         expression.append(str(token))
-        pass
     return columns
 
 def is_aggregate_function(token):
@@ -858,7 +874,7 @@ if __name__ == '__main__':
     )
     print(aliases)
     print(extract_selection(statement, aliases, Schema()))
-    print(extract_condition(statement))
+    print(extract_condition(statement, aliases, Schema()))
     print(extract_aggregation(statement, aliases, Schema()))
     print(extract_nested_setoperation(statement))
     print(extract_others(statement, aliases, Schema()))

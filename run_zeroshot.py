@@ -10,15 +10,15 @@ from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from src.spider_sparc_preprocess import DatabaseModel, SpiderSample
+from src.data_preprocess import DatabaseModel, SpiderSample, BirdSample
 from src.pymodels import SQLResponse
 from src.prompts import Prompts
 from src.eval import result_eq, check_if_exists_orderby
 from src.db_utils import get_schema_str
 from src.database import SqliteDatabase
-from src.spider_sparc_preprocess import (
+from src.data_preprocess import (
     process_all_tables, 
-    load_samples_spider,
+    load_samples_spider_bird,
 )
 from src.eval_complexity import (
     load_plus_data, 
@@ -156,7 +156,7 @@ def get_output_results(predictions: list[dict], spider_tables: dict[str, Databas
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Zero-shot SQL generation with OpenAI')
-    parser.add_argument('--ds', type=str, default='spider', help='Dataset to use for training.')
+    parser.add_argument('--ds', type=str, default='spider', help='Dataset to use for training. spider or bird') 
     parser.add_argument('--table_file', type=str, default='tables.json', help='File containing the tables.')
     parser.add_argument('--description_file', type=str, default='description.json', help='File containing the descriptions.')
     parser.add_argument('--type', type=str, default='train', help='Type of data to use for .')
@@ -185,7 +185,7 @@ if __name__ == '__main__':
         eval_path.mkdir(parents=True)
         
     if args.task == 'zero_shot':
-        samples = load_samples_spider(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
         print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')    
         prompt = PromptTemplate(
             template=Prompts.zero_shot_inference,

@@ -1,6 +1,7 @@
 import json
 import sqlglot
 import sqlglot.expressions as exp
+import pandas as pd
 from tqdm import tqdm
 from pathlib import Path
 from typing import Optional
@@ -11,16 +12,28 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.output_parsers import JsonOutputParser
 
 from .db_utils import get_schema_str, get_data_dict
-from .pymodels import DatabaseModel, QuestionSQL, SparcSample, SpiderSample, Description
+from .pymodels import DatabaseModel, QuestionSQL, SparcSample, SpiderSample, BirdSample, Description
 from .prompts import Prompts
 
-def load_spider_sparc_data(data_path: Path, load_test: bool=False) -> tuple:
-    with (data_path / f'tables.json').open() as f:
-        data_tables = json.load(f)
-    with (data_path / f'train.json').open() as f:
-        train_data = json.load(f)
-    with (data_path / f'dev.json').open() as f:
-        dev_data = json.load(f)
+def load_raw_data(data_path: Path, load_test: bool=False) -> tuple:
+    if 'bird' in str(data_path).lower():
+        with (data_path / 'train' / f'train_tables.json').open() as f:
+            train_tables = json.load(f)
+        with (data_path / 'dev' / f'dev_tables.json').open() as f:
+            dev_tables = json.load(f)
+        data_tables = train_tables + dev_tables
+
+        with (data_path / 'train' / f'train.json').open() as f:
+            train_data = json.load(f)
+        with (data_path / 'dev' / f'dev.json').open() as f:
+            dev_data = json.load(f)
+    else:
+        with (data_path / f'tables.json').open() as f:
+            data_tables = json.load(f)
+        with (data_path / f'train.json').open() as f:
+            train_data = json.load(f)
+        with (data_path / f'dev.json').open() as f:
+            dev_data = json.load(f)
 
     if load_test:
         with (data_path / f'test.json').open() as f:
@@ -96,7 +109,7 @@ def process_samples_sparc(all_data: list[dict], tables: dict[str, DatabaseModel]
 
     return data_by_db_id
 
-def filter_samples_by_count_spider(all_data: dict, n: int=5) -> list:
+def filter_samples_by_count_spider_bird(all_data: dict, n: int=5) -> list:
     counter = defaultdict(int)
     for data in all_data:
         db_id = data['db_id']
@@ -128,7 +141,39 @@ def process_samples_spider(all_data: list, tables: dict[str, DatabaseModel], ski
         data_by_db_id[db_id].append(sample)
     return data_by_db_id
 
-def split_train_dev_test(data_samples: dict, train_ratio: float=0.8, dev_ratio: float=0.1) -> tuple:
+def process_samples_bird(all_data: list, tables: dict[str, DatabaseModel], skip: Optional[list]) -> dict[str, list[SparcSample]]:
+    data_by_db_id = defaultdict(list)
+    for i, data in tqdm(enumerate(all_data), total=len(all_data)):
+        if i in skip:
+            continue
+        db_id = data['db_id']
+        schema = tables[db_id].db_schema
+
+        final_sql = preprocess_sql(data['SQL'])
+        try:
+            final_tbls = extract_used_table(final_sql, schema)
+        except Exception as e:
+            print(f'Warning Skipped: {db_id} - {i}')
+            continue
+
+        sample = BirdSample(
+            sample_id=i,
+            db_id=db_id,
+            final=QuestionSQL(
+                question=data['question'], 
+                sql=final_sql, 
+                source_tables=final_tbls
+            ),
+            evidence=data['evidence']
+        )
+        data_by_db_id[db_id].append(sample)
+    return data_by_db_id
+
+def split_train_dev_test(
+        data_samples: dict, 
+        train_ratio: float=0.8, 
+        dev_ratio: float=0.1,
+    ) -> tuple:
     assert 1.0 - train_ratio - dev_ratio > 0, 'Not enough samples for test set'
     train_samples = []
     dev_samples = []
@@ -145,7 +190,6 @@ def split_train_dev_test(data_samples: dict, train_ratio: float=0.8, dev_ratio: 
     return train_samples, dev_samples, test_samples
 
 def get_sparc_schema_description(proj_path: Path, sparc_tables: dict) -> dict:
-
     prompt = PromptTemplate(
         template=Prompts.dbschema_description,
         input_variables=['schema']
@@ -166,7 +210,73 @@ def get_sparc_schema_description(proj_path: Path, sparc_tables: dict) -> dict:
     with (proj_path / 'data' / 'description.json').open('w') as f:
         json.dump(all_descriptions, f, indent=4)
 
-def save_samples_spider(samples: list[SpiderSample], path: Path):
+def get_bird_description(proj_path: Path):
+    bird_path = proj_path / 'data' / 'bird'
+
+    with (bird_path / 'train' / f'train_tables.json').open() as f:
+        train_tables = json.load(f)
+
+    with (bird_path / 'dev' / f'dev_tables.json').open() as f:
+        dev_tables = json.load(f)
+        
+    database_description = defaultdict()
+    iterator = tqdm(train_tables, total=len(train_tables))
+    for table in iterator:
+        db_id = table['db_id']
+        iterator.set_description(f'{db_id}')
+        p = bird_path / 'train' / 'train_databases' / f'{db_id}' / 'database_description'
+        desc = {}
+        for t, origin_t in zip(table['table_names'], table['table_names_original']):
+            with (p / f'{t}.csv').open(encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+            with (p / f'{t}.csv').open('w') as f:
+                for line in lines:
+                    f.write(line.replace('�', '').replace('â¢', ''))
+
+            df = pd.read_csv(p / f'{t}.csv', encoding='utf-8')
+            df['value_description'] = df['value_description'].astype(str)
+            df.loc[df['value_description'] == 'nan', 'value_description'] = ''
+
+            if sum(df['column_description'].isnull()) > 0:
+                idx = df['column_description'].isnull()
+                df['column_description'] = df['column_description'].astype(str)
+                df.loc[idx, ['column_description']] = df['original_column_name'].str.lower()
+
+            df['desc'] = df['column_description'] + ' ' + df['value_description'].str.replace('commonsense evidence:', '\n').str.replace('commonsense reasoning:', '\n').str.replace('Commonsense evidence:', '\n')
+            desc[origin_t] = dict(df.loc[:, ['original_column_name', 'desc']].values)
+
+        database_description[db_id] = desc
+
+    iterator = tqdm(dev_tables, total=len(dev_tables))
+    for table in iterator:
+        db_id = table['db_id']
+        iterator.set_description(f'{db_id}')
+        p = bird_path / 'dev' / 'dev_databases' / f'{db_id}' / 'database_description'
+        desc = {}
+        for t in table['table_names_original']:
+            with (p / f'{t}.csv').open(encoding='utf-8', errors='replace') as f:
+                lines = f.readlines()
+            with (p / f'{t}.csv').open('w') as f:
+                for line in lines:
+                    f.write(line.replace('�', '').replace('â¢', ''))
+
+            df = pd.read_csv(p / f'{t}.csv', encoding='utf-8')
+            df['value_description'] = df['value_description'].astype(str)
+            df.loc[df['value_description'] == 'nan', 'value_description'] = ''
+
+            if sum(df['column_description'].isnull()) > 0:
+                idx = df['column_description'].isnull()
+                df['column_description'] = df['column_description'].astype(str)
+                df.loc[idx, ['column_description']] = df['original_column_name'].str.lower()
+
+            df['desc'] = df['column_description'] + ' ' + df['value_description'].str.replace('commonsense evidence:', '\n').str.replace('commonsense reasoning:', '\n').str.replace('Commonsense evidence:', '\n')
+            desc[t] = dict(df.loc[:, ['original_column_name', 'desc']].values)
+        database_description[db_id] = desc
+
+    with (proj_path / 'data' / 'bird_description.json').open('w') as f:
+        json.dump(database_description, f, indent=2)
+
+def save_samples_spider_bird(samples: list[SpiderSample|BirdSample], path: Path):
     with path.open('w') as f:
         for s in samples:
             data = {
@@ -178,24 +288,43 @@ def save_samples_spider(samples: list[SpiderSample], path: Path):
                     'source_tables': s.final.source_tables
                 }
             }
+            if isinstance(s, BirdSample):
+                data['evidence'] = s.evidence
             data_json = json.dumps(data)
             f.write(data_json+'\n')
 
-def load_samples_spider(path: Path) -> list[SpiderSample]:
+def load_samples_spider_bird(path: Path) -> list[SpiderSample|BirdSample]:
     samples = []
-    with path.open() as f:
-        for line in f:
-            data = json.loads(line)
-            sample = SpiderSample(
-                sample_id=data['sample_id'],
-                db_id=data['db_id'],
-                final=QuestionSQL(
-                    question=data['final']['question'],
-                    sql=data['final']['sql'],
-                    source_tables=data['final']['source_tables']
+    if 'bird' in str(path).lower():
+        with path.open() as f:
+            for line in f:
+                data = json.loads(line)
+                sample = BirdSample(
+                    sample_id=data['sample_id'],
+                    db_id=data['db_id'],
+                    final=QuestionSQL(
+                        question=data['final']['question'],
+                        sql=data['final']['sql'],
+                        source_tables=data['final']['source_tables']
+                    ),
+                    evidence=data['evidence']
                 )
-            )
-            samples.append(sample)
+                samples.append(sample)
+    else:
+        with path.open() as f:
+            for line in f:
+                data = json.loads(line)
+                sample = SpiderSample(
+                    sample_id=data['sample_id'],
+                    db_id=data['db_id'],
+                    final=QuestionSQL(
+                        question=data['final']['question'],
+                        sql=data['final']['sql'],
+                        source_tables=data['final']['source_tables']
+                    )
+                )
+                samples.append(sample)
+
     return samples
 
 def save_samples_sparc(samples: list[SparcSample], path: Path):
@@ -245,6 +374,7 @@ def load_samples_sparc(path: Path) -> list[SparcSample]:
             samples.append(sample)
     return samples
 
+
 if __name__ == '__main__':
     _ = load_dotenv(find_dotenv())
     
@@ -253,7 +383,7 @@ if __name__ == '__main__':
     with (proj_path / 'data' / 'description.json').open() as f:
         all_descriptions = json.load(f)
 
-    tables, train_data, dev_data = load_spider_sparc_data(sparc_path)
+    tables, train_data, dev_data = load_raw_data(sparc_path)
     print(f'Number of train: {len(train_data)} | Number of dev: {len(dev_data)}')
     
     sparc_tables = process_all_tables(tables)
@@ -273,13 +403,13 @@ if __name__ == '__main__':
     # --------------------------------------------------------------------------------------------
     # spider dataset
     spider_path = proj_path / 'data' / 'spider'
-    tables, train_data, dev_data = load_spider_sparc_data(spider_path)
+    tables, train_data, dev_data = load_raw_data(spider_path)
 
     with (proj_path / 'data' / 'description.json').open() as f:
         all_descriptions = json.load(f)
     spider_tables = process_all_tables(tables, descriptions=all_descriptions)
 
-    all_data = filter_samples_by_count_spider(train_data+dev_data, n=10)
+    all_data = filter_samples_by_count_spider_bird(train_data+dev_data, n=10)
     # process samples -> {db_id: list of samples}
     skip = [3146, 4690, 4691]
     spider_samples = process_samples_spider(all_data, spider_tables, skip=skip)
@@ -287,5 +417,23 @@ if __name__ == '__main__':
     train_samples, dev_samples, test_samples = split_train_dev_test(spider_samples, train_ratio=0.8, dev_ratio=0.1)
     print(f'Number of train: {len(train_samples)} | Number of dev: {len(dev_samples)}')
 
-    save_samples_spider(train_samples, proj_path / 'data' / 'spider_train.json')
-    save_samples_spider(dev_samples, proj_path / 'data' / 'spider_dev.json')
+    save_samples_spider_bird(train_samples, proj_path / 'data' / 'spider_train.json')
+    save_samples_spider_bird(dev_samples, proj_path / 'data' / 'spider_dev.json')
+
+    # --------------------------------------------------------------------------------------------
+    # bird dataset
+    bird_path = proj_path / 'data' / 'bird'
+    
+    tables, train_data, dev_data = load_raw_data(bird_path, load_test=False)
+
+    with (proj_path / 'data' / 'bird_description.json').open() as f:
+        all_descriptions = json.load(f)
+
+    bird_tables = process_all_tables(tables, descriptions=all_descriptions)
+    all_data = filter_samples_by_count_spider_bird(train_data+dev_data, n=10)
+    skip = [622, 6916, 6917, 6930, 6967, 6987]
+    bird_samples = process_samples_bird(all_data, bird_tables, skip=skip)
+    train_samples, dev_samples, test_samples = split_train_dev_test(bird_samples, train_ratio=0.8, dev_ratio=0.1)
+    
+    save_samples_spider_bird(train_samples, proj_path / 'data' / 'bird_train.json')
+    save_samples_spider_bird(dev_samples+test_samples, proj_path / 'data' / 'bird_dev.json')

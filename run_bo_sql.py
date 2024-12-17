@@ -18,7 +18,7 @@ from langchain_core.prompts import PromptTemplate
 from src.prompts import Prompts
 from src.pymodels import SQLResponse
 from src.db_utils import get_schema_str
-from src.spider_sparc_preprocess import process_all_tables
+from src.data_preprocess import process_all_tables
 from src.pymodels import SQLResponse, DatabaseModel
 from src.database import SqliteDatabase
 from src.eval import result_eq, check_if_exists_orderby

@@ -2,10 +2,10 @@ from pydantic import BaseModel, Field
 from typing import Optional
 
 class Description(BaseModel):
-    output: dict[str, dict[str, str]] = Field(description='Description of each column for all tables in the database')
+    output: dict[str, dict[str, dict[str, str]]] = Field(description='Description of each column for all tables in the database')
 
 class SQLResponse(BaseModel):
-    output: str = Field(description='The full SQL query.')
+    full_sql_query: str = Field(description='The full SQL query.')
     rationale: list[str] = Field(description='The step-by-step reasoning to generate the SQL query. ')
 
 class BODescription(BaseModel):
@@ -41,3 +41,11 @@ class SpiderSample(BaseModel):
     db_id: str
     final: QuestionSQL
     bo: Optional[BusinessObject] = None
+
+class BirdSample(BaseModel):
+    sample_id: int|str = None
+    db_id: str
+    final: QuestionSQL
+    evidence: str
+    bo: Optional[BusinessObject] = None
+

@@ -11,7 +11,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.runnables import RunnableSequence
 
 from src.db_utils import get_schema_str
-from src.spider_sparc_preprocess import process_all_tables
+from src.data_preprocess import process_all_tables
 from src.prompts import Prompts
 from src.parsing_sql import tks, Statement
 from src.pymodels import (
