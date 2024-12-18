@@ -42,7 +42,7 @@ def load_raw_data(data_path: Path, load_test: bool=False) -> tuple:
     return data_tables, train_data, dev_data
 
 def preprocess_sql(sql: str) -> str:
-    return sql.replace('"', "'").strip()
+    return sql.replace('"', "'").replace('`', "'").strip()
 
 def process_all_tables(tables: list, descriptions: Optional[dict[str, dict[str, str]]]=None) -> dict[str, DatabaseModel]:
     database = defaultdict(DatabaseModel)

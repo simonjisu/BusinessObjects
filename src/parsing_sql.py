@@ -470,7 +470,7 @@ def _extract_conditions(expr: exp.Expression, aliases: Dict[str, Dict[str, str]]
     Flatten a WHERE/HAVING condition (which may be a complex AND/OR tree) into a list of individual conditions.
     Each leaf condition is returned as a separate string.
     """
-    if isinstance(expr, (exp.And, exp.Or)):
+    if isinstance(expr, (exp.And, exp.Or, exp.Not, exp.Between)):
         # Recurse into both sides
         operations = []
         conditions = []
@@ -621,19 +621,68 @@ def extract_all(parsed_query: exp.Expression, schema: Schema) -> Tuple[Set[str],
     return results
 
 if __name__ == "__main__":
-    sql = "SELECT * FROM table1 WHERE col1 > 10 AND col2 = 'abc' ORDER BY col3 LIMIT 10"
-    query = sqlglot.parse_one(sql)
-    aliases = extract_aliases(query)
-    schema = Schema()
-    selection = extract_selection(query, aliases, schema)
-    print(selection)
-    condition = extract_condition(query, aliases, schema)
-    print(condition)
-    aggregation = extract_aggregation(query, aliases, schema)
-    print(aggregation)
-    others = extract_others(query, aliases, schema)
-    print(others)
-
+    schema = Schema(schema={
+        'state': {'StateCode': 'text', 'State': 'text', 'Region': 'text'},
+        'callcenterlogs': {'Date received': 'text',
+        'Complaint ID': 'text',
+        'rand client': 'text',
+        'phonefinal': 'text',
+        'vru+line': 'text',
+        'call_id': 'text',
+        'priority': 'text',
+        'type': 'text',
+        'outcome': 'text',
+        'server': 'text',
+        'ser_start': 'text',
+        'ser_exit': 'text',
+        'ser_time': 'text'},
+        'client': {'client_id': 'text',
+        'sex': 'text',
+        'day': 'text',
+        'month': 'text',
+        'year': 'text',
+        'age': 'text',
+        'social': 'text',
+        'first': 'text',
+        'middle': 'text',
+        'last': 'text',
+        'phone': 'text',
+        'email': 'text',
+        'address_1': 'text',
+        'address_2': 'text',
+        'city': 'text',
+        'state': 'text',
+        'zipcode': 'text',
+        'district_id': 'text'},
+        'district': {'district_id': 'text',
+        'city': 'text',
+        'state_abbrev': 'text',
+        'division': 'text'},
+        'events': {'Date received': 'date',
+        'Product': 'date',
+        'Sub-product': 'date',
+        'Issue': 'date',
+        'Sub-issue': 'date',
+        'Consumer complaint narrative': 'date',
+        'Tags': 'date',
+        'Consumer consent provided?': 'date',
+        'Submitted via': 'date',
+        'Date sent to company': 'date',
+        'Company response to consumer': 'date',
+        'Timely response?': 'date',
+        'Consumer disputed?': 'date',
+        'Complaint ID': 'date',
+        'Client_ID': 'date'},
+        'reviews': {'Date': 'text',
+        'Stars': 'text',
+        'Reviews': 'text',
+        'Product': 'text',
+        'district_id': 'text'}})
+    
+    sql1 = "SELECT * FROM client WHERE age > 30"
+    parsed_query = sqlglot.parse_one(sql1)
+    results = extract_all(parsed_query, schema)
+    
 # class ControlFlow(BaseModel):
 #     select_seen: bool = Field(default=False)
 #     from_seen: bool = Field(default=False)
