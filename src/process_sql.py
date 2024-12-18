@@ -76,15 +76,26 @@ class Schema:
 
         return idMap
 
+    # def get_table_name(self, column: str, tables: list[str]=[]):
+    #     if tables:
+    #         schema = dict(list(filter(lambda x: x[0] in tables, self.schema.items())))
+    #     else:
+    #         schema = self.schema
+    #     for table, cols in schema.items():
+    #         if column.lower() in cols:
+    #             return table
+        
+    #     return None
+    
     def get_table_name(self, column: str, tables: list[str]=[]):
         if tables:
-            schema = dict(list(filter(lambda x: x[0] in tables, self.schema.items())))
+            subset_schema = {k: v for k,v in self.schema.items() if k in tables}
         else:
-            schema = self.schema
-        for table, cols in schema.items():
+            subset_schema = self.schema
+
+        for table, cols in subset_schema.items():
             if column.lower() in cols:
                 return table
-        
         return None
 
 def get_schema(db):
@@ -589,3 +600,299 @@ def skip_semicolon(toks, start_idx):
     while idx < len(toks) and toks[idx] == ";":
         idx += 1
     return idx
+
+
+
+
+# ====
+# from typing import Set, Tuple, Dict, Any, List
+# from pydantic import BaseModel, Field
+# import sqlglot
+# from sqlglot import Expression, Select, Subquery, Table, Column, Alias, Union, Intersect, Except, Function, Identifier, Binary, Condition, expressions as exp
+
+# def is_aggregate_function(func_name: str) -> bool:
+#     AGG_OPS = ('MAX', 'MIN', 'COUNT', 'SUM', 'AVG', 'STDDEV', 'VARIANCE')
+#     return func_name.upper() in AGG_OPS
+
+# def extract_aliases(query: Select) -> Dict[str, Dict[str, str]]:
+#     """
+#     Extract table and column aliases from the given SELECT query.
+#     Returns:
+#         {
+#           'table': {alias_or_table: table_name},
+#           'column': {alias: actual_expression_string}
+#         }
+#     """
+#     alias_mapping = {'table': {}, 'column': {}}
+
+#     # Extract table aliases from FROM clause
+#     from_clause = query.args.get("from")
+#     if from_clause and isinstance(from_clause, exp.From):
+#         _handle_from_clause(from_clause, alias_mapping['table'])
+
+#     # Extract column aliases from SELECT clause
+#     for select_exp in query.select(exclude_alias=True):
+#         # If we have a Tuple (e.g., SELECT (col1 AS alias1, col2 AS alias2)),
+#         # we need to dive into it to find Alias nodes
+#         if isinstance(select_exp, exp.Tuple):
+#             _extract_column_aliases_from_tuple(select_exp, alias_mapping['column'])
+#         elif isinstance(select_exp, exp.Alias):
+#             # Direct alias
+#             alias = select_exp.alias
+#             if alias:
+#                 alias_mapping['column'][alias.lower()] = str(select_exp.this)
+#         else:
+#             # It's possible we have columns without AS aliases
+#             # or other expressions. If you want to handle those, do it here.
+#             pass
+
+#     return alias_mapping
+
+# def _handle_from_clause(from_clause: exp.From, table_alias_map: Dict[str, str]):
+#     main_source = from_clause.this
+#     _handle_table_or_subquery(main_source, table_alias_map)
+
+#     joins = from_clause.args.get("joins")
+#     if joins:
+#         for join_expr in joins:
+#             right_source = join_expr.args.get("expression")
+#             if right_source:
+#                 _handle_table_or_subquery(right_source, table_alias_map)
+
+# def _handle_table_or_subquery(expr: Expression, table_alias_map: Dict[str, str]):
+#     if isinstance(expr, exp.Table):
+#         table_name = expr.name
+#         alias = expr.alias
+#         if alias:
+#             table_alias_map[alias.lower()] = table_name.lower()
+#         else:
+#             table_alias_map[table_name.lower()] = table_name.lower()
+#     elif isinstance(expr, exp.Subquery):
+#         alias = expr.alias
+#         if alias:
+#             table_alias_map[alias.lower()] = f"({expr})"
+#     elif isinstance(expr, exp.Select):
+#         alias = expr.alias
+#         if alias:
+#             table_alias_map[alias.lower()] = f"({expr})"
+
+# def _extract_column_aliases_from_tuple(tuple_expr: exp.Tuple, column_alias_map: Dict[str, str]):
+#     # Tuple has multiple expressions inside: could be Alias, Column, or other things
+#     for inner_expr in tuple_expr.expressions:
+#         if isinstance(inner_expr, exp.Alias):
+#             alias = inner_expr.alias
+#             if alias:
+#                 column_alias_map[alias.lower()] = str(inner_expr.this)
+#         elif isinstance(inner_expr, exp.Tuple):
+#             # Nested tuples (rare but possible)
+#             _extract_column_aliases_from_tuple(inner_expr, column_alias_map)
+#         # If needed, handle other node types here
+
+
+# def extract_selection(query: Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[Set[str], Set[Tuple[str, str]]]:
+#     """
+#     Extract columns and types (<s>, <c>, <a>) from SELECT clause.
+#     unique_columns: set of columns encountered
+#     selection_types: set of (selection_str, tag)
+#     """
+#     unique_columns = set()
+#     selection_types = set()
+
+#     for select_exp in query.select():
+#         # select_exp could be Column, Function, Binary operation, etc.
+#         columns_in_item = _extract_columns_from_expression(select_exp, aliases, schema)
+#         unique_columns.update(columns_in_item)
+
+#         tag = _classify_expression(select_exp)
+#         selection_str = str(select_exp).lower().strip()
+#         selection_types.add((selection_str, tag))
+
+#     return unique_columns, selection_types
+
+# def _get_full_column_name(col: Column, aliases: Dict[str, Dict[str, str]], schema: Schema) -> str:
+#     """
+#     Returns the fully qualified column name using the schema.
+#     """
+#     column_name = col.name.lower()
+#     table_alias = col.table.lower() if col.table else None
+
+#     # Determine the real table name either from aliases or the schema
+#     if table_alias and table_alias in aliases['table']:
+#         real_table_name = aliases['table'][table_alias]
+#     else:
+#         # If no alias or alias not found, attempt to resolve via schema
+#         possible_tables = list(aliases['table'].values())
+#         real_table_name = schema.get_table_name(column_name, possible_tables)
+
+#     # Construct key for idMap lookup
+#     if real_table_name:
+#         key = f"{real_table_name.lower()}.{column_name}"
+#     else:
+#         # Fallback if no table found
+#         key = column_name
+
+#     # Return mapped identifier or a fallback
+#     return schema.idMap.get(key, f"__{key}__")
+
+# def _extract_columns_from_expression(expr: Expression, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Set[str]:
+#     """
+#     Extracts column identifiers from an expression using the schema and aliases.
+#     """
+#     columns = set()
+#     for col in expr.find_all(Column):
+#         full_col_name = _get_full_column_name(col, aliases, schema)
+#         columns.add(full_col_name)
+#     return columns
+
+# def _classify_expression(expr: Expression) -> str:
+#     # classify into <s>, <c>, <a>
+#     # <s> simple column
+#     # <c> calculation or non-agg function
+#     # <a> aggregate function
+#     if isinstance(expr, Column):
+#         return '<s>'
+#     if isinstance(expr, exp.Function):
+#         return '<a>' if is_aggregate_function(expr.name) else '<c>'
+#     if isinstance(expr, (exp.Binary, exp.Condition)):
+#         return '<c>'
+#     return '<s>'
+
+# def extract_condition(query: Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[Set[str], Set[str]]:
+#     """
+#     Extract conditions from WHERE and HAVING.
+#     Returns conditions and operator types
+#     """
+#     conditions = set()
+#     operator_types = set()
+
+#     for clause_name in ("where", "having"):
+#         clause = query.args.get(clause_name)
+#         if clause:
+#             # clause is typically a Condition (AND/OR structure)
+#             for cond in _extract_conditions(clause):
+#                 # cond is a string representation of a condition
+#                 conditions.add(cond)
+#                 # extract ops
+#                 ops = _extract_operation_types(cond)
+#                 if ops:
+#                     operator_types.add(ops)
+
+#     return conditions, operator_types
+
+# def _extract_conditions(expr: Expression) -> List[str]:
+#     # Flatten a WHERE/HAVING condition (which may be a complex AND/OR tree) into a list of conditions
+#     # Each leaf condition is often a Binary or Comparison.
+#     conditions = []
+#     if isinstance(expr, (exp.And, exp.Or)):
+#         conditions.extend(_extract_conditions(expr.args['this']))
+#         conditions.extend(_extract_conditions(expr.args['expression']))
+#     else:
+#         # This should be a leaf condition, convert to string
+#         conditions.append(str(expr))
+#     return conditions
+
+# def _extract_operation_types(condition_str: str) -> str:
+#     # Simple heuristic: look for operators like =, >, <, IN, LIKE, etc.
+#     # In sqlglot, you could also directly inspect the expressions instead of using strings.
+#     WHERE_OPS = ('not', 'between', '=', '>', '<', '>=', '<=', '!=', '<>', 'in', 'like', 'is', 'exists')
+#     ops_found = []
+#     # Lowercase and split by non-alphabetic chars might help find ops
+#     lower_cond = condition_str.lower()
+#     for op in WHERE_OPS:
+#         if op in lower_cond:
+#             ops_found.append(op)
+#     return ' '.join(ops_found)
+
+# def extract_aggregation(query: Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[Set[str], Set[Tuple[str, str]]]:
+#     """
+#     Extract columns in GROUP BY and classify them.
+#     """
+#     unique_columns = set()
+#     aggregation_types = set()
+
+#     group = query.args.get('group')
+#     if group:
+#         for g in group:
+#             columns_in_item = _extract_columns_from_expression(g, aliases, schema)
+#             unique_columns.update(columns_in_item)
+#             tag = _classify_expression(g)
+#             aggregation_types.add((str(g).lower().strip(), tag))
+
+#     return unique_columns, aggregation_types
+
+# def extract_nested_setoperation(expression: Expression) -> int:
+#     """
+#     Count set operations and nested queries.
+#     """
+#     count = 0
+#     # If there is a UNION, INTERSECT, EXCEPT, they will appear as such nodes
+#     if isinstance(expression, (Union, Intersect, Except)):
+#         # count the two sides
+#         count += 2  # or count += 1 depending on interpretation
+#         # check nested
+#         count += extract_nested_setoperation(expression.args['this'])
+#         count += extract_nested_setoperation(expression.args['expression'])
+#     elif isinstance(expression, Subquery):
+#         # subquery inside
+#         count += 1
+#         if expression.args.get('this'):
+#             count += extract_nested_setoperation(expression.args['this'])
+#     elif isinstance(expression, Select):
+#         # check for subqueries in FROM / WHERE / HAVING
+#         for from_exp in expression.from_:
+#             if isinstance(from_exp, Subquery):
+#                 count += 1
+#                 count += extract_nested_setoperation(from_exp.args['this'])
+
+#         # WHERE/HAVING subqueries
+#         for clause_name in ('where', 'having'):
+#             clause = expression.args.get(clause_name)
+#             if clause:
+#                 for sq in clause.find_all(Subquery):
+#                     count += 1
+#                     count += extract_nested_setoperation(sq.args['this'])
+
+#     return count
+
+# def extract_others(query: Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Dict[str, Any]:
+#     """
+#     Extract DISTINCT columns, ORDER BY columns, LIMIT usage.
+#     """
+#     others = {'distinct': set(), 'order by': set(), 'limit': False}
+
+#     # DISTINCT
+#     if query.distinct:
+#         # If DISTINCT is used, we find columns in SELECT again
+#         # Typically distinct applies to all selected columns
+#         for col in query.select():
+#             columns_in_item = _extract_columns_from_expression(col, aliases, schema)
+#             others['distinct'].update(columns_in_item)
+
+#     # ORDER BY
+#     order = query.args.get('order')
+#     if order:
+#         # order is a list of Order expressions
+#         for o in order:
+#             # Extract columns from the order expression
+#             cols = _extract_columns_from_expression(o, aliases, schema)
+#             others['order by'].update(cols)
+
+#     # LIMIT
+#     if query.args.get('limit') is not None:
+#         others['limit'] = True
+
+#     return others
+
+# # -------------------------------------------------------------------------------------------
+# # Example usage
+# if __name__ == '__main__':
+#     sql = "SELECT t1.a, b AS bb, c FROM table1 t1 WHERE a > 10 AND b < 20"
+#     query = sqlglot.parse_one(sql)
+#     schema = Schema({'table1': ['a','b','c']})
+#     aliases = extract_aliases(query)
+#     print("Aliases:", aliases)
+#     print("Selection:", extract_selection(query, aliases, schema))
+#     print("Condition:", extract_condition(query, aliases, schema))
+#     print("Aggregation:", extract_aggregation(query, aliases, schema))
+#     print("Nested/SetOperations:", extract_nested_setoperation(query))
+#     print("Others:", extract_others(query, aliases, schema))
