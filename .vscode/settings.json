@@ -1,6 +1,7 @@
 {
-    "python.defaultInterpreterPath": "/home/simonjisu/code/BusinessLake/.venv/bin/python",
+    "python.defaultInterpreterPath": "/home/simonjisu/code/BusinessObjects/.venv/bin/python",
     "python.analysis.extraPaths": [
-        "/home/simonjisu/code/BusinessLake"
-    ]
+        "/home/simonjisu/code/BusinessObjects"
+    ],
+    "python.languageServer": "Pylance"
 }
