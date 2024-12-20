@@ -13,17 +13,17 @@ from sqlglot import expressions as exp
 from typing import Set, Tuple, Dict, Any, List
 from src.process_sql import Schema
 
-OPERATOR_MAP = {
-    exp.EQ: "=",
-    exp.GT: ">",
-    exp.GTE: ">=",
-    exp.LT: "<",
-    exp.LTE: "<=",
-    exp.NEQ: "<>",    # for not equal
-    exp.Is: "is",     # if needed
-    exp.Like: "like", # if needed
-    # Add more if needed
-}
+# OPERATOR_MAP = {
+#     exp.EQ: "=",
+#     exp.GT: ">",
+#     exp.GTE: ">=",
+#     exp.LT: "<",
+#     exp.LTE: "<=",
+#     exp.NEQ: "<>",
+#     exp.Is: "is",
+#     exp.Like: "like",
+#     # Add more if needed
+# }
 
 class Schema:
     """
@@ -127,14 +127,8 @@ def get_subqueries(node: exp.Expression) -> List[exp.Select]:
 def extract_aliases(node: exp.Expression) -> Dict[str, Dict[str, str]]:
     """
     Extract table and column aliases from the given query expression.
-    This function now supports set operations by recursively extracting aliases
+    This function handles set operations by recursively extracting aliases
     from both sides of the set operation.
-    
-    Returns:
-        {
-          'table': {alias_or_table: table_name},
-          'column': {alias: actual_expression_string}
-        }
     """
     alias_mapping = {'table': {}, 'column': {}}
 
@@ -143,7 +137,6 @@ def extract_aliases(node: exp.Expression) -> Dict[str, Dict[str, str]]:
             target[key].update(val)
 
     if isinstance(node, exp.Select):
-        # Extract from a single SELECT
         merge_aliases(alias_mapping, _extract_aliases_from_select(node))
     elif isinstance(node, (exp.Union, exp.Intersect, exp.Except)):
         # Extract from both sides of the set operation
@@ -153,8 +146,7 @@ def extract_aliases(node: exp.Expression) -> Dict[str, Dict[str, str]]:
         merge_aliases(alias_mapping, right_aliases)
     else:
         # If we encounter a node that is neither a Select nor a set operation,
-        # we attempt to find Select or set operations inside it (e.g. Subquery).
-        # This might be rare for top-level, but let's be safe.
+        # we attempt to find Select or set operations inside it.
         for sub in node.find_all(exp.Select):
             merge_aliases(alias_mapping, _extract_aliases_from_select(sub))
         for op_node in node.find_all(exp.Union):
@@ -170,15 +162,20 @@ def extract_aliases(node: exp.Expression) -> Dict[str, Dict[str, str]]:
     return alias_mapping
 
 def _extract_aliases_from_select(query: exp.Select) -> Dict[str, Dict[str, str]]:
-    """
-    Extract table and column aliases from a single SELECT query.
-    """
     alias_mapping = {'table': {}, 'column': {}}
 
     # Extract table aliases from FROM clause
     from_clause = query.args.get("from")
     if from_clause and isinstance(from_clause, exp.From):
-        _handle_from_clause(from_clause, alias_mapping['table'])
+        _handle_table_or_subquery(from_clause.this, alias_mapping['table'])
+
+    # Extract table aliases from JOINS
+    joins = query.args.get("joins")
+    if joins:
+        for join_expr in joins:
+            right_source = join_expr.args.get("this")  # 'this' is the table in the Join node
+            if right_source:
+                _handle_table_or_subquery(right_source, alias_mapping['table'])
 
     # Extract column aliases from SELECT clause
     for select_exp in query.select(exclude_alias=True):
@@ -191,43 +188,37 @@ def _extract_aliases_from_select(query: exp.Select) -> Dict[str, Dict[str, str]]
 
     return alias_mapping
 
-def _handle_from_clause(from_clause: exp.From, table_alias_map: Dict[str, str]):
-    main_source = from_clause.this
-    _handle_table_or_subquery(main_source, table_alias_map)
-
-    joins = from_clause.args.get("joins")
-    if joins:
-        for join_expr in joins:
-            right_source = join_expr.args.get("expression")
-            if right_source:
-                _handle_table_or_subquery(right_source, table_alias_map)
-
 def _handle_table_or_subquery(expr: exp.Expression, table_alias_map: Dict[str, str]):
     if isinstance(expr, exp.Table):
         table_name = expr.name
-        alias = expr.alias
+        alias_expr = expr.args.get("alias")
+        alias = None
+        if alias_expr and isinstance(alias_expr, exp.TableAlias):
+            alias = alias_expr.this.name.lower()
+        else:
+            alias_id = expr.alias
+            if alias_id:
+                alias = alias_id.lower()
+
         if alias:
-            table_alias_map[alias.lower()] = table_name.lower()
+            table_alias_map[alias] = table_name.lower()
         else:
             table_alias_map[table_name.lower()] = table_name.lower()
+
     elif isinstance(expr, exp.Subquery):
-        # For subqueries, we want just the inner SELECT (if present), not the parentheses or alias.
-        alias = expr.alias
-        if alias:
+        alias_expr = expr.args.get("alias")
+        if alias_expr and isinstance(alias_expr, exp.TableAlias):
+            sub_alias = alias_expr.this.name.lower()
             inner_select = expr.args.get("this")
             if inner_select and isinstance(inner_select, exp.Select):
-                # Use the string form of the select only
-                subquery_str = '(' + str(inner_select) + ')'
+                table_alias_map[sub_alias] = str(inner_select)
             else:
-                # Fallback if somehow not a SELECT
-                subquery_str = str(expr)
-            table_alias_map[alias.lower()] = subquery_str
+                table_alias_map[sub_alias] = str(expr)
     elif isinstance(expr, exp.Select):
-        # A derived table: treat similarly to a subquery, but it might not be wrapped in parentheses.
-        alias = expr.alias
-        if alias:
-            # Return just the SELECT's string
-            table_alias_map[alias.lower()] = '(' + str(expr) + ')'
+        alias_expr = expr.args.get("alias")
+        if alias_expr and isinstance(alias_expr, exp.TableAlias):
+            sub_alias = alias_expr.this.name.lower()
+            table_alias_map[sub_alias] = str(expr)
 
 def _extract_column_aliases_from_tuple(tuple_expr: exp.Tuple, column_alias_map: Dict[str, str]):
     for inner_expr in tuple_expr.expressions:
@@ -237,6 +228,7 @@ def _extract_column_aliases_from_tuple(tuple_expr: exp.Tuple, column_alias_map: 
                 column_alias_map[alias.lower()] = str(inner_expr.this)
         elif isinstance(inner_expr, exp.Tuple):
             _extract_column_aliases_from_tuple(inner_expr, column_alias_map)
+
 
 def extract_selection(query: exp.Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[Set[str], Set[Tuple[str, str]]]:
     """
@@ -310,7 +302,7 @@ def _determine_tag(expr: exp.Expression) -> str:
     return '<s>'
 
 
-def _format_expression(expr: exp.Expression, aliases: Dict[str, Dict[str, str]], schema: Schema, remove_alias: bool = False) -> str|Tuple[str, str]:
+def _format_expression(expr: exp.Expression, aliases: Dict[str, Dict[str, str]], schema: Schema, remove_alias: bool = False) -> str:
     if remove_alias and isinstance(expr, exp.Alias):
         return _format_expression(expr.this, aliases, schema, remove_alias=True)
 
@@ -344,8 +336,7 @@ def _format_expression(expr: exp.Expression, aliases: Dict[str, Dict[str, str]],
         # Binary operators like EQ, LT, GT, etc.
         left = _format_expression(expr.args.get('this'), aliases, schema, remove_alias=remove_alias)
         right = _format_expression(expr.args.get('expression'), aliases, schema, remove_alias=remove_alias)
-        op = OPERATOR_MAP.get(type(expr), expr.key)  # fallback to expr.key if not in map
-        return op, f"{left} {op} {right}"
+        return f"{left} {expr.key.lower()} {right}"
 
     # if isinstance(expr, exp.Condition):
     #     left = _format_expression(expr.args.get('this'), aliases, schema, remove_alias=remove_alias)
@@ -460,46 +451,116 @@ def extract_condition(query: exp.Select, aliases: Dict[str, Dict[str, str]], sch
         if clause:
             # clause is WHERE or HAVING. We only want the conditions inside.
             # clause.this is the actual condition expression (e.g., AND/OR tree).
-            ops, conds = _extract_conditions(clause.this, aliases, schema)
-            conditions.update(conds)
-            operator_types.update(ops)
+            _extract_conditions(
+                clause.this, aliases, schema, operator_types
+            )
     return conditions, operator_types
 
-def _extract_conditions(expr: exp.Expression, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[List[str], List[str]]:
+def _extract_conditions(
+    expr: exp.Expression,
+    aliases: Dict[str, Dict[str, str]],
+    schema: Schema,
+    operator_types: Set[str],
+) -> str:
     """
-    Flatten a WHERE/HAVING condition (which may be a complex AND/OR tree) into a list of individual conditions.
-    Each leaf condition is returned as a separate string.
+    Recursively extract a condition string from an expression in WHERE/HAVING clauses.
+    Also populates operator_types with encountered operators.
+
+    Returns:
+        A single string representing the condition (which may include nested conditions).
+
+    Logic:
+    - AND/OR: combine left and right conditions with parentheses, record 'and'/'or'
+    - NOT: prepend 'not ' to the child's condition. If the child contains ' between ',
+      replace it with ' not between ' to form a proper condition.
+    - BETWEEN: return the condition as 'col between val1 and val2', record 'between'
+    - Binary operators (=, >, <, etc.): return 'left op right', record the operator
+    - Leaf nodes: directly return their string representation
     """
-    if isinstance(expr, (exp.And, exp.Or, exp.Not, exp.Between)):
-        # Recurse into both sides
-        operations = []
+
+    if isinstance(expr, (exp.And, exp.Or)):
+        # Logical connectors: AND / OR
         conditions = []
         left = expr.args.get('this')
         right = expr.args.get('expression')
         if left:
-            ops, conds = _extract_conditions(left, aliases, schema)
-            operations.extend(ops)
-            conditions.extend(conds)
+            left_cond = _extract_conditions(left, aliases, schema, operator_types)
+            if isinstance(left_cond, str):
+                left_cond = [left_cond]
+            conditions.extend(left_cond)
         if right:
-            ops, conds = _extract_conditions(right, aliases, schema)
-            operations.extend(ops)
-            conditions.extend(conds)
-        return operations, conditions
-    else:
-        # This is a leaf condition (equality, comparison, etc.)
-        # Format this condition to replace columns and remove aliases
-        op, cond = _format_condition_expression(expr, aliases, schema)
-        return [op], [cond]
+            right_cond = _extract_conditions(right, aliases, schema, operator_types)
+            if isinstance(right_cond, str):
+                right_cond = [right_cond]
+            conditions.extend(right_cond)
+        return conditions
+    elif isinstance(expr, exp.Not):
+        # NOT operator
+        # case1: NOT col [op] val
+        # case2: col NOT BETWEEN A AND B
+        # case3: NOT IN (...) / NOT LIKE [string]
+        # case4: IS NOT NULL
+        operator_types.add(exp.Not.key.lower())
+        child = expr.args.get('this')
+        child_cond = _extract_conditions(child, aliases, schema, operator_types) if child else ''
+        child_cond = child_cond.lower()
 
-def _format_condition_expression(expr: exp.Expression, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[str, str]:
-    """
-    Format a leaf condition expression into a string, with columns replaced by schema-based names.
-    We can reuse the _format_expression function defined previously to ensure consistency.
-    """
-    # We'll assume we have a _format_expression function from earlier steps.
-    # It converts columns to __table.column__, literals to strings, etc.
-    op, cond = _format_expression(expr, aliases, schema, remove_alias=True)
-    return op, cond
+        is_case1 = False
+        key = None
+        if f' {exp.Between.key.lower()} ' in child_cond:
+            # case2: Replace first occurrence of ' between ' with ' not between '
+            key = f' {exp.Between.key.lower()} '
+        elif f' {exp.In.key.lower()} ' in child_cond:
+            # case3: Replace first occurrence of ' in ' with ' not in '
+            key = f' {exp.In.key.lower()} '
+        elif f' {exp.Like.key.lower()} ' in child_cond:
+            # case3: Replace first occurrence of ' like ' with ' not like '
+            key = f' {exp.Like.key.lower()} '
+        elif f' {exp.Is.key.lower()} ' in child_cond:
+            # case4: Replace first occurrence of ' is ' with ' is not '
+            key = f' {exp.Is.key.lower()} '
+        else:
+            is_case1 = True
+
+        if is_case1:
+            # case 1
+            child_cond = f"{exp.Not.key.lower()} {child_cond}"
+        else:
+            # other cases
+            idx = child_cond.index(key)
+            child_cond = child_cond[:idx] + f' {exp.Not.key.lower()}{key}' + child_cond[idx + len(key):]
+        return child_cond
+    elif isinstance(expr, exp.Between):
+        # BETWEEN operator
+        # T.col between A and B
+        # Between(
+        #   this=Column(
+        #     this=Identifier(this=col, quoted=False),
+        #     table=Identifier(this=T, quoted=False)),
+        #   low=Literal(this=A, is_string=False),
+        #   high=Literal(this=B, is_string=False)
+        # )
+        operator_types.add(exp.Between.key.lower())
+        left = expr.args.get('this')
+        col = _format_expression(left, aliases, schema, remove_alias=True)
+        low = _format_expression(expr.args.get('low'), aliases, schema, remove_alias=True)
+        high = _format_expression(expr.args.get('high'), aliases, schema, remove_alias=True)
+        cond_str = f"{col} between {low} and {high}"
+        return cond_str
+    else:
+        # Binary operators or leaf conditions
+        # _format_expression returns a single string like "col = val"
+        cond_str = _format_expression(expr, aliases, schema, remove_alias=True)
+
+        # If it's a binary expression, expr.key is the operator
+        # For simple literals/columns without operators, expr might not be a binary op
+        # But typically conditions have operators.
+        if isinstance(expr, exp.Binary):
+            op = expr.key.lower()
+            operator_types.add(op)
+
+        # Return the condition string as is
+        return cond_str
 
 def extract_aggregation(query: exp.Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[Set[str], Set[Tuple[str, str]]]:
     """
