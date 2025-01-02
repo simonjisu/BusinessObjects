@@ -1,18 +1,11 @@
-# import sqlparse
-# from sqlparse.sql import (
-#     Token, TokenList, IdentifierList, Identifier, Function, Statement, Parenthesis, Operation,
-#     Where, Comparison
-# )
-# import sqlparse.tokens as tks
-# from typing import Callable
-# from pydantic import BaseModel, Field
+
 from .process_sql import Schema
 from collections import defaultdict
 import sqlglot
 from sqlglot import expressions as exp
 from typing import Set, Tuple, Dict, Any, List
 from src.process_sql import Schema
-
+from itertools import chain
 # OPERATOR_MAP = {
 #     exp.EQ: "=",
 #     exp.GT: ">",
@@ -24,6 +17,17 @@ from src.process_sql import Schema
 #     exp.Like: "like",
 #     # Add more if needed
 # }
+
+STRING_TYPE = '[PLACEHOLDER-TYPE:STRING]'.lower()
+NUMERIC_TYPE = '[PLACEHOLDER-TYPE:NUMERIC]'.lower()
+SUBQUERY = '[PLACEHOLDER-SUBQUERY]'.lower()
+
+def flatten_conds(xs):
+    for x in xs:
+        if isinstance(x[0], str) and isinstance(x[1], exp.Expression):
+            yield x
+        else:
+            yield from flatten_conds(x)
 
 class Schema:
     """
@@ -55,6 +59,20 @@ class Schema:
 
         return idMap
     
+    def check_column_exist(self, column: str, tables: list[str]=[]):
+        if column == '*':
+            return True
+        
+        if tables:
+            subset_schema = {k: v for k,v in self.schema.items() if k in tables}
+        else:
+            subset_schema = self.schema
+
+        for cols in subset_schema.values():
+            if column.lower() in cols:
+                return True
+        return False
+    
     def get_table_name(self, column: str, tables: list[str]=[]):
         if tables:
             subset_schema = {k: v for k,v in self.schema.items() if k in tables}
@@ -77,6 +95,7 @@ def get_subqueries(node: exp.Expression) -> List[exp.Select]:
     
     Returns a list of exp.Select nodes representing all individual SELECT queries.
     """
+
     if isinstance(node, (exp.Union, exp.Intersect, exp.Except)):
         # Set operation: recursively get subqueries from both sides
         left = get_subqueries(node.args.get('this'))
@@ -88,6 +107,11 @@ def get_subqueries(node: exp.Expression) -> List[exp.Select]:
         inner = node.args.get("this")
         return get_subqueries(inner) if inner else []
 
+    if isinstance(node, exp.CTE):
+        # Common Table Expression: extract subqueries from its inner SELECT
+        inner = node.args.get("this")
+        return inner if inner else []
+
     if isinstance(node, exp.Select):
         # Start with this SELECT node
         results = [node]
@@ -98,13 +122,15 @@ def get_subqueries(node: exp.Expression) -> List[exp.Select]:
             # Main source in FROM
             main_source = from_clause.this
             if main_source:
-                results += get_subqueries(main_source)
+                subquery = get_subqueries(main_source)
+                results += subquery
 
             # Joins in FROM
             for join_expr in from_clause.args.get("joins", []):
                 right_source = join_expr.args.get("expression")
                 if right_source:
-                    results += get_subqueries(right_source)
+                    subquery = get_subqueries(right_source)
+                    results += subquery
 
         # Check WHERE and HAVING for nested subqueries
         for clause_name in ("where", "having"):
@@ -112,12 +138,21 @@ def get_subqueries(node: exp.Expression) -> List[exp.Select]:
             if clause:
                 # find_all Subqueries inside the clause
                 for sub in clause.find_all(exp.Subquery):
-                    results += get_subqueries(sub)
+                    subquery = get_subqueries(sub)
+                    results += subquery
+
+        # check CTEs
+        ctes = node.args.get('with')
+        if ctes:
+            for cte in ctes:
+                subquery = get_subqueries(cte.this)
+                results += subquery
 
         # Check SELECT expressions for nested subqueries
         for e in node.select():
             for sub in e.find_all(exp.Subquery):
-                results += get_subqueries(sub)
+                subquery = get_subqueries(sub)
+                results += subquery
 
         return results
 
@@ -130,34 +165,40 @@ def extract_aliases(node: exp.Expression) -> Dict[str, Dict[str, str]]:
     This function handles set operations by recursively extracting aliases
     from both sides of the set operation.
     """
-    alias_mapping = {'table': {}, 'column': {}}
-
-    def merge_aliases(target, source):
+    
+    def merge_aliases(target: Dict[str, set], source: Dict[str, set]):
         for key, val in source.items():
             target[key].update(val)
 
-    if isinstance(node, exp.Select):
-        merge_aliases(alias_mapping, _extract_aliases_from_select(node))
-    elif isinstance(node, (exp.Union, exp.Intersect, exp.Except)):
-        # Extract from both sides of the set operation
-        left_aliases = extract_aliases(node.args.get('this'))
-        right_aliases = extract_aliases(node.args.get('expression'))
-        merge_aliases(alias_mapping, left_aliases)
-        merge_aliases(alias_mapping, right_aliases)
-    else:
-        # If we encounter a node that is neither a Select nor a set operation,
-        # we attempt to find Select or set operations inside it.
-        for sub in node.find_all(exp.Select):
-            merge_aliases(alias_mapping, _extract_aliases_from_select(sub))
-        for op_node in node.find_all(exp.Union):
-            sub_aliases = extract_aliases(op_node)
-            merge_aliases(alias_mapping, sub_aliases)
-        for op_node in node.find_all(exp.Intersect):
-            sub_aliases = extract_aliases(op_node)
-            merge_aliases(alias_mapping, sub_aliases)
-        for op_node in node.find_all(exp.Except):
-            sub_aliases = extract_aliases(op_node)
-            merge_aliases(alias_mapping, sub_aliases)
+    alias_mapping = {'table': {}, 'column': {}}
+    subqueries = get_subqueries(node)
+    for s in subqueries:
+        x = _extract_aliases_from_select(s)
+        merge_aliases(alias_mapping, x)
+    
+
+    # if isinstance(node, exp.Select):
+    #     merge_aliases(alias_mapping, _extract_aliases_from_select(node))
+    # elif isinstance(node, (exp.Union, exp.Intersect, exp.Except)):
+    #     # Extract from both sides of the set operation
+    #     left_aliases = extract_aliases(node.args.get('this'))
+    #     right_aliases = extract_aliases(node.args.get('expression'))
+    #     merge_aliases(alias_mapping, left_aliases)
+    #     merge_aliases(alias_mapping, right_aliases)
+    # else:
+    #     # If we encounter a node that is neither a Select nor a set operation,
+    #     # we attempt to find Select or set operations inside it.
+    #     for sub in node.find_all(exp.Select):
+    #         merge_aliases(alias_mapping, _extract_aliases_from_select(sub))
+    #     for op_node in node.find_all(exp.Union):
+    #         sub_aliases = extract_aliases(op_node)
+    #         merge_aliases(alias_mapping, sub_aliases)
+    #     for op_node in node.find_all(exp.Intersect):
+    #         sub_aliases = extract_aliases(op_node)
+    #         merge_aliases(alias_mapping, sub_aliases)
+    #     for op_node in node.find_all(exp.Except):
+    #         sub_aliases = extract_aliases(op_node)
+    #         merge_aliases(alias_mapping, sub_aliases)
 
     return alias_mapping
 
@@ -165,27 +206,21 @@ def _extract_aliases_from_select(query: exp.Select) -> Dict[str, Dict[str, str]]
     alias_mapping = {'table': {}, 'column': {}}
 
     # Extract table aliases from FROM clause
-    from_clause = query.args.get("from")
+    from_clause = query.args.get('from')
     if from_clause and isinstance(from_clause, exp.From):
         _handle_table_or_subquery(from_clause.this, alias_mapping['table'])
 
     # Extract table aliases from JOINS
-    joins = query.args.get("joins")
+    joins = query.args.get('joins')
     if joins:
         for join_expr in joins:
-            right_source = join_expr.args.get("this")  # 'this' is the table in the Join node
+            right_source = join_expr.args.get('this')  # 'this' is the table in the Join node
             if right_source:
                 _handle_table_or_subquery(right_source, alias_mapping['table'])
 
     # Extract column aliases from SELECT clause
-    for select_exp in query.select(exclude_alias=True):
-        if isinstance(select_exp, exp.Alias):
-            alias = select_exp.alias
-            if alias:
-                alias_mapping['column'][alias.lower()] = str(select_exp.this)
-        elif isinstance(select_exp, exp.Tuple):
-            _extract_column_aliases_from_tuple(select_exp, alias_mapping['column'])
-
+    for alias in query.find_all(exp.Alias):
+        alias_mapping['column'][alias.alias.lower()] = str(alias.this)
     return alias_mapping
 
 def _handle_table_or_subquery(expr: exp.Expression, table_alias_map: Dict[str, str]):
@@ -214,6 +249,12 @@ def _handle_table_or_subquery(expr: exp.Expression, table_alias_map: Dict[str, s
                 table_alias_map[sub_alias] = str(inner_select)
             else:
                 table_alias_map[sub_alias] = str(expr)
+        else:
+            # need to add a custom name for the subquery
+            n_sub = len([k for k in table_alias_map if 'subquery' in k])
+            sub_alias = f"q{n_sub}"
+            table_alias_map[sub_alias] = str(expr)
+
     elif isinstance(expr, exp.Select):
         alias_expr = expr.args.get("alias")
         if alias_expr and isinstance(alias_expr, exp.TableAlias):
@@ -271,136 +312,420 @@ def extract_selection(query: exp.Select, aliases: Dict[str, Dict[str, str]], sch
             )
     """
     unique_columns = set()
-    selection_types = set()
+    selection_asts = set()
 
     for select_exp in query.select():
-        columns_in_item = _extract_columns_from_expression(select_exp, aliases, schema)
-        unique_columns.update(columns_in_item)
+        columns = _extract_columns_from_expression(select_exp, aliases, schema)
+        unique_columns.update(columns)
 
         tag = _determine_tag(select_exp)
-        expr_str = _format_expression(select_exp, aliases, schema, remove_alias=True)
-        selection_types.add((expr_str, tag))
+        expr_str, expr = _format_expression(select_exp, aliases, schema, remove_alias=True)
+        selection_asts.add((expr_str, expr, tag))
 
-    return unique_columns, selection_types
+    return unique_columns, selection_asts
 
 
 def _determine_tag(expr: exp.Expression) -> str:
-    # All functions or binary operations => <f>, else <s>
+    # All functions or binary operations => <func>, <select>, <subquery>
     if isinstance(expr, exp.Column):
-        return '<s>'
+        return '<select>'
     if isinstance(expr, (exp.Func, exp.Binary, exp.Condition)):
-        return '<f>'
+        return '<func>'
+    if isinstance(expr, exp.Subquery):
+        return '<subquery>'
     # Check nested functions or binaries inside
     if any(isinstance(x, exp.Func) for x in expr.find_all(exp.Func)):
-        return '<f>'
+        return '<func>'
     if any(isinstance(x, exp.Binary) for x in expr.find_all(exp.Binary)):
-        return '<f>'
-
+        return '<func>'
     # If it's just columns, <s>, else default <s>
     if all(isinstance(x, exp.Column) for x in expr.find_all(exp.Column)):
-        return '<s>'
-    return '<s>'
+        return '<select>'
+    return '<select>'
 
+def _format_expression(
+        expr: exp.Expression, 
+        aliases: Dict[str, Dict[str, str]], 
+        schema: Schema, 
+        anonymize_literal: bool = False,
+        remove_alias: bool = True,
+        lower_case: bool = False  # used for literal case
+    ) -> Tuple[str, exp.Expression]:
+    if remove_alias and isinstance(expr, (exp.Alias, exp.Ordered)):
+        return _format_expression(
+            expr.this, 
+            aliases, 
+            schema, 
+            remove_alias=True,
+            anonymize_literal=anonymize_literal
+        )
 
-def _format_expression(expr: exp.Expression, aliases: Dict[str, Dict[str, str]], schema: Schema, remove_alias: bool = False) -> str:
-    if remove_alias and isinstance(expr, exp.Alias):
-        return _format_expression(expr.this, aliases, schema, remove_alias=True)
+    if isinstance(expr, (exp.Column, exp.Star)):
+        name = _get_full_column_name(expr, aliases, schema)
+        # change expression
+        if expr.args.get('table') and expr.table.lower() in aliases['table']:
+            # 1st condition: check if there is table
+            # 2nd condition: check alias table
+            original_table = aliases['table'][expr.table.lower()]
+            quoted = expr.args['table'].quoted
+            expr.args['table'] = exp.Identifier(this=original_table, quoted=quoted)
+        elif not expr.args.get('table') and name != '__all__':
+            if 'select' in name.lower():
+                # subquery column
+                subquery_col = name.lstrip('(').rstrip(')')
+                expr.args['this'] = exp.Subquery(this=sqlglot.parse_one(subquery_col))
+            else:
+                table = name.split('.')[0].lstrip('__')
+                expr.args['table'] = exp.Identifier(this=table, quoted=False)
 
-    if isinstance(expr, exp.Column):
-        return _get_full_column_name(expr, aliases, schema)
-
+        return name, expr
+        
     if isinstance(expr, exp.Func):
         func_name = type(expr).__name__
-        if func_name.lower() == 'substr':
+        # need to run recursive if have multiple functions
+        if func_name.lower() == 'anonymous':
+            # `this` is the function name: e.g., strftime
+            func_name = expr.args.get('this').lower()
+        elif func_name.lower() == 'substr':
             func_name = 'substring'
         else:
             func_name = func_name.lower()
 
+        args = [k for k in expr.args.keys() if expr.args.get(k)]
         args_list = []
-        main_arg = expr.args.get("this")
-        if main_arg:
-            args_list.append(_format_expression(main_arg, aliases, schema, remove_alias=remove_alias))
+        for arg in args:
+            arg_expr = expr.args.get(arg)
+            if isinstance(arg_expr, exp.Expression):
+                name, new_expr = _format_expression(
+                    arg_expr, 
+                    aliases, 
+                    schema, 
+                    anonymize_literal=anonymize_literal
+                )
+                expr.args[arg] = new_expr
+                args_list.append(name)
+            elif isinstance(arg_expr, list):
+                # handle case: IF, Anonymous Function arguments(e.g., strftime)
+                for sub_arg_expr in arg_expr:
+                    name, new_expr = _format_expression(
+                        sub_arg_expr, 
+                        aliases, 
+                        schema, 
+                        anonymize_literal=anonymize_literal
+                    )
+                    sub_arg_expr = new_expr
+                    args_list.append(name)
 
-        for additional_arg in expr.args.get("expressions") or []:
-            args_list.append(_format_expression(additional_arg, aliases, schema, remove_alias=remove_alias))
+        return f"{func_name}({', '.join(args_list)})", expr
 
-        return f"{func_name}({', '.join(args_list)})"
+    if isinstance(expr, exp.Distinct):
+        # Only one case that appears with Function e.g., COUNT(DISTINCT col)
+        name, new_expr = _format_expression(
+            expr.expressions[0], 
+            aliases, 
+            schema, 
+            anonymize_literal=anonymize_literal
+        )
+        expr.expressions[0] = new_expr
 
-    if isinstance(expr, exp.Tuple):
-        formatted = []
-        for t in expr.expressions:
-            formatted.append(_format_expression(t, aliases, schema, remove_alias=remove_alias))
-        return f"({', '.join(formatted)})"
+        return 'DISTINCT '.lower() + name, expr
+    
+    if isinstance(expr, exp.Paren):
+        name, new_expr = _format_expression(
+            expr.args.get('this'), 
+            aliases, 
+            schema, 
+            anonymize_literal=anonymize_literal
+        )
+        expr.args['this'] = new_expr
+        return '(' + name + ')', expr
+    
+    if isinstance(expr, exp.In):
+        return _format_exp_in(expr, aliases, schema, anonymize_literal=anonymize_literal)
+    
+    if isinstance(expr, exp.Between):
+        return _format_exp_between(expr, aliases, schema, anonymize_literal=anonymize_literal)
 
+    if isinstance(expr, exp.Not):
+        return _format_exp_not(expr, aliases, schema, anonymize_literal=anonymize_literal)
+    
     if isinstance(expr, exp.Binary):
-        # Binary operators like EQ, LT, GT, etc.
-        left = _format_expression(expr.args.get('this'), aliases, schema, remove_alias=remove_alias)
-        right = _format_expression(expr.args.get('expression'), aliases, schema, remove_alias=remove_alias)
-        return f"{left} {expr.key.lower()} {right}"
+        # Binary operators like EQ, LT, GT, Div, Mul etc.
+        left_expr = expr.args.get('this')
+        left_name, new_expr = _format_expression(left_expr, aliases, schema, anonymize_literal=anonymize_literal)
+        expr.args['this'] = new_expr
+        
+        right_expr = expr.args.get('expression')
+        right_name, new_expr = _format_expression(right_expr, aliases, schema, anonymize_literal=anonymize_literal)
+        expr.args['expression'] = new_expr
+        return f"{left_name} {expr.key.lower()} {right_name}", expr
 
-    # if isinstance(expr, exp.Condition):
-    #     left = _format_expression(expr.args.get('this'), aliases, schema, remove_alias=remove_alias)
-    #     right = _format_expression(expr.args.get('expression'), aliases, schema, remove_alias=remove_alias)
-    #     op = expr.key.lower()
-    #     return f"{left} {op} {right}"
+    # if isinstance(expr, exp.Alias) and not remove_alias:
+    #     base_str, new_expr = _format_expression(expr.this, aliases, schema, remove_alias=remove_alias, anonymize_literal=anonymize_literal)
+    #     return f"{base_str} as {expr.alias.lower()}", new_expr
 
-    if isinstance(expr, exp.Alias) and not remove_alias:
-        base_str = _format_expression(expr.this, aliases, schema, remove_alias=remove_alias)
-        return f"{base_str} as {expr.alias.lower()}"
+    if isinstance(expr, exp.Window):
+        # this, partition_by(list), order(list), over
+        window_name, new_expr = _format_expression(
+            expr.args.get('this'), 
+            aliases, 
+            schema, 
+            anonymize_literal=anonymize_literal
+        )
+        expr.args['this'] = new_expr
+        # partition_by
+        partitions = expr.args.get('partition_by')
+        if partitions:
+            partitions_str = []
+            partitions_expr = []
+            for partition in partitions:
+                name, new_expr = _format_expression(
+                    partition, 
+                    aliases, 
+                    schema, 
+                    anonymize_literal=anonymize_literal
+                )
+                partitions_str.append(name)
+                partitions_expr.append(new_expr)
+            expr.args['partition_by'] = partitions_expr
+            
+            key = f'(PARTITION BY {", ".join(partitions_str)})'
+        # order
+        orders = expr.args.get('order')
+        if orders:
+            orders_str = []
+            orders_expr = []
+            for order in orders:
+                name, new_expr = _format_expression(
+                    order, 
+                    aliases, 
+                    schema, 
+                    anonymize_literal=anonymize_literal
+                )
+                orders_str.append(name)
+                orders_expr.append(new_expr)
+            expr.args['order'] = orders_expr
+            key = f"(ORDER BY {', '.join(orders_str)})"
+
+        return (f"{window_name} OVER " + key).lower(), expr
 
     if isinstance(expr, exp.Identifier):
-        return expr.name.lower()
+        return expr.name.lower(), expr
 
     if isinstance(expr, exp.Subquery):
-        subexpr = expr.args.get('this')
-        if subexpr:
-            return f"({_format_expression(subexpr, aliases, schema, remove_alias=remove_alias)})"
-        return "(subquery)"
-
-    if isinstance(expr, exp.Select):
-        cols = [_format_expression(s, aliases, schema, remove_alias=remove_alias) for s in expr.select()]
-        return "SELECT " + ", ".join(cols)
+        # since we extract all the subqueires at the first time
+        # we can just return the subquery as a string
+        return SUBQUERY, expr
+    
+    if isinstance(expr, exp.Neg):
+        # Unary operator
+        # e.g., -1
+        # Neg(this=Literal(this=1, is_string=False))
+        sub_expr = expr.args.get('this')
+        sub_name, new_expr = _format_expression(sub_expr, aliases, schema, anonymize_literal=anonymize_literal)
+        expr.args['this'] = new_expr
+        return f"-{sub_name}", expr
 
     if isinstance(expr, exp.Literal):
-        val = expr.this
-        if expr.is_string:
-            return f"'{val}'"
-        return str(val)
+        if anonymize_literal:
+            if expr.is_string:
+                return STRING_TYPE, exp.Literal.string(STRING_TYPE)
+            else:
+                return NUMERIC_TYPE, exp.Literal.number(NUMERIC_TYPE)
+        else:
+            if lower_case:
+                return str(expr).lower(), expr
+            else:
+                return str(expr), expr
+        
+    if isinstance(expr, (exp.DataType, exp.Null, exp.Boolean)):
+        if lower_case:
+            return str(expr).lower(), expr
+        else:
+            return str(expr), expr
+    
+    return None, expr
 
-    return str(expr).lower()
+def _format_exp_in(
+        expr: exp.In, 
+        aliases: Dict[str, Dict[str, str]], 
+        schema: Schema, 
+        anonymize_literal: bool=False) -> Tuple[str, exp.In]:
+    """
+    # this, expressions | this, query
+    
+    case1: col IN (...)
+    right expression is a list of literals: do not make it lower case
+    e.g., 
+        In(
+        this=Column(
+            this=Identifier(this=job_desc, quoted=False),
+            table=Identifier(this=T2, quoted=False)),
+        expressions=[
+            Literal(this=Editor, is_string=True),
+            Literal(this=Designer, is_string=True)])
 
+    case2: col IN (SELECT ...)
+    """
+    args = [k for k in expr.args.keys() if expr.args.get(k)]
+    left_expr = expr.args.get('this')
+    left_name, new_expr = _format_expression(left_expr, aliases, schema, anonymize_literal=anonymize_literal)
+    expr.args['this'] = new_expr
+    if 'expressions' in args:
+        # case1: col IN (...)
+        right_exprs = expr.args.get('expressions')
+        right_exprs_str = []
+        new_right_exprs = []
+        for right_expr in right_exprs:
+            right_name, new_expr = _format_expression(right_expr, aliases, schema, anonymize_literal=anonymize_literal, lower_case=False)
+            right_exprs_str.append(right_name)
+            new_right_exprs.append(new_expr)
+
+        expr.args['expressions'] = new_right_exprs
+        return f"{left_name} {expr.key.lower()} ({', '.join(right_exprs_str)})", expr
+    else:
+        # case2: col IN (SELECT ...)
+        right_expr = expr.args.get('query')
+        right_name, new_expr = _format_expression(right_expr, aliases, schema, anonymize_literal=anonymize_literal)
+        expr.args['query'] = new_expr
+        return f"{left_name} {expr.key.lower()} ({right_name})", expr
+
+def _format_exp_between(
+        expr: exp.Between, 
+        aliases: Dict[str, Dict[str, str]], 
+        schema: Schema, 
+        anonymize_literal: bool=False) -> Tuple[str, exp.In]:
+    left = expr.args.get('this')
+    col, col_expr = _format_expression(
+        left, aliases, schema, remove_alias=True, anonymize_literal=anonymize_literal)
+    low, low_expr = _format_expression(
+        expr.args.get('low'), aliases, schema, anonymize_literal=anonymize_literal)
+    high, high_expr = _format_expression(
+        expr.args.get('high'), aliases, schema, anonymize_literal=anonymize_literal)
+    expr.args['this'] = col_expr
+    expr.args['low'] = low_expr
+    expr.args['high'] = high_expr
+    return f"{col} between {low} and {high}", expr
+
+def _format_exp_not(
+        expr: exp.Not,
+        aliases: Dict[str, Dict[str, str]],
+        schema: Schema,
+        anonymize_literal: bool=False) -> Tuple[str, exp.Not]:
+    child = expr.args.get('this')
+    if child:
+        child_name, child_expr = _format_expression(
+            child, aliases, schema, anonymize_literal=anonymize_literal)
+    else:
+        child_name = str(expr)
+        child_expr = expr
+    expr.args['this'] = child_expr
+
+    child_name = child_name.lower()
+
+    is_case1 = False
+    key = None
+    if f' {exp.Between.key.lower()} ' in child_name:
+        # case2: Replace first occurrence of ' between ' with ' not between '
+        key = f' {exp.Between.key} '
+        to = f' {exp.Not.key} {exp.Between.key} '.lower()
+    elif f' {exp.In.key.lower()} ' in child_name:
+        # case3: Replace first occurrence of ' in ' with ' not in '
+        key = f' {exp.In.key} '.lower()
+        to = f' {exp.Not.key} {exp.In.key} '.lower()
+    elif f' {exp.Like.key.lower()} ' in child_name:
+        # case3: Replace first occurrence of ' like ' with ' not like '
+        key = f' {exp.Like.key} '.lower()
+        to = f' {exp.Not.key} {exp.Like.key} '.lower()
+    elif f' {exp.Is.key.lower()} ' in child_name:
+        # case4: Replace first occurrence of ' is ' with ' is not '
+        key = f' {exp.Is.key} '.lower()
+        to = f' {exp.Is.key} {exp.Not.key} '.lower()
+    else:
+        is_case1 = True
+
+    if is_case1:
+        # case 1
+        child_name = f"{exp.Not.key.lower()} {child_name}"
+    else:
+        # other cases
+        idx = child_name.index(key)
+        child_name = child_name[:idx] + to + child_name[idx + len(key):]
+
+    return child_name, expr
 
 def _get_full_column_name(col: exp.Column, aliases: Dict[str, Dict[str, str]], schema: Schema) -> str:
     column_name = col.name.lower()
-
+    if (not schema.check_column_exist(column_name)) and (column_name not in aliases['column']):
+        assert False, f"Column {column_name} not found in schema"
+    
     # If the column is *, map directly to __all__
     if column_name == '*':
         return schema.idMap['*']
+    
+    if column_name in aliases['column']:
+        subquery_col = aliases['column'][column_name]
+        if not subquery_col.startswith('('):
+            subquery_col = f"({subquery_col}"
+        if not subquery_col.endswith(')'):
+            subquery_col = f"{subquery_col})"
+        return subquery_col
 
     table_alias = col.table.lower() if col.table else None
-
-    if table_alias and table_alias in aliases['table']:
-        real_table_name = aliases['table'][table_alias]
+    # None: means either table has no alias or table is not present in the node
+    if table_alias:
+        if table_alias in aliases['table']:
+            # table alias need to be replaced with the original table name
+            real_table_name = aliases['table'][table_alias]
+        else:
+            # table alias is the original table name
+            real_table_name = table_alias
     else:
-        possible_tables = list(aliases['table'].values())
+        # find possible tables in the schema
+        possible_tables = [v for v in aliases['table'].values() if 'select' not in v.lower()]
         real_table_name = schema.get_table_name(column_name, possible_tables)
+        if not real_table_name:
+            # possible in the subquery column alias
+            possible_tables = [k for k, v in aliases['table'].items() if 'select' in v.lower()]
+            for table_name in possible_tables:
+                alias = [x.alias.lower() for x in sqlglot.parse_one(aliases['table'][table_name]).find_all(exp.Alias)]
+                if column_name in alias:
+                    real_table_name = f'subquery_{table_name}'
+                    break
+
+        if not real_table_name:
+            assert False, f"Table not found for column {column_name}"
+        # if column_name in aliases['column']:
+        #     original_table_name = aliases['column'][column_name].split('.')[0].lower()
+        #     real_table_name = aliases['table'][original_table_name]
+        # else:
+        #     possible_tables = list(aliases['table'].values())
+        #     real_table_name = schema.get_table_name(column_name, possible_tables)
 
     if real_table_name:
         key = f"{real_table_name.lower()}.{column_name}"
     else:
         key = column_name
+    
     return schema.idMap.get(key, f"__{key}__")
 
 
-def _extract_columns_from_expression(expr: exp.Expression, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Set[str]:
+def _extract_columns_from_expression(
+        expr: exp.Expression, 
+        aliases: Dict[str, Dict[str, str]], 
+        schema: Schema) -> List[str]:
     columns = set()
     for col in expr.find_all(exp.Column, exp.Star):
         full_col_name = _get_full_column_name(col, aliases, schema)
-        columns.add(full_col_name)
+        columns.update([full_col_name])
     
     return columns
 
-def extract_condition(query: exp.Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[Set[str], Set[str]]:
+def extract_condition(
+        query: exp.Select, 
+        aliases: Dict[str, Dict[str, str]], 
+        schema: Schema, 
+        anonymize_literal:bool=True) -> Tuple[Set[str], Set[str]]:
     """
     Extracts information about conditions and operators used in the WHERE and HAVING clauses of a query.
 
@@ -443,7 +768,7 @@ def extract_condition(query: exp.Select, aliases: Dict[str, Dict[str, str]], sch
                 {'=', '>', 'COUNT'}
             )
     """
-    conditions = set()
+    condition_asts = set()
     operator_types = set()
 
     for clause_name in ("where", "having"):
@@ -451,17 +776,24 @@ def extract_condition(query: exp.Select, aliases: Dict[str, Dict[str, str]], sch
         if clause:
             # clause is WHERE or HAVING. We only want the conditions inside.
             # clause.this is the actual condition expression (e.g., AND/OR tree).
-            _extract_conditions(
-                clause.this, aliases, schema, operator_types
+            conds = _extract_conditions(
+                clause.this, aliases, schema, operator_types, anonymize_literal=anonymize_literal
             )
-    return conditions, operator_types
+            if not isinstance(conds, list):
+                conds = [conds]
+            # flatten the list of conditions
+            conds = flatten_conds(conds)
+            condition_asts.update(conds)
+            assert len(condition_asts) > 0, f"Failed to extract conditions from {clause_name} clause {len(condition_asts)}"
+    return condition_asts, operator_types
 
 def _extract_conditions(
     expr: exp.Expression,
     aliases: Dict[str, Dict[str, str]],
     schema: Schema,
     operator_types: Set[str],
-) -> str:
+    anonymize_literal: bool = False,
+    ) -> List[Tuple[str, exp.Expression]]:
     """
     Recursively extract a condition string from an expression in WHERE/HAVING clauses.
     Also populates operator_types with encountered operators.
@@ -478,91 +810,43 @@ def _extract_conditions(
     - Leaf nodes: directly return their string representation
     """
 
-    if isinstance(expr, (exp.And, exp.Or)):
+    if isinstance(expr, exp.Paren):
+        return _extract_conditions(
+            expr.args.get('this'), 
+            aliases, 
+            schema, 
+            operator_types, 
+            anonymize_literal=anonymize_literal
+        )
+    elif isinstance(expr, (exp.And, exp.Or)):
         # Logical connectors: AND / OR
         conditions = []
         left = expr.args.get('this')
         right = expr.args.get('expression')
         if left:
-            left_cond = _extract_conditions(left, aliases, schema, operator_types)
-            if isinstance(left_cond, str):
-                left_cond = [left_cond]
-            conditions.extend(left_cond)
+            left_name, left_expr = _extract_conditions(
+                left, aliases, schema, operator_types, anonymize_literal)
+            conditions.append((left_name, left_expr))
         if right:
-            right_cond = _extract_conditions(right, aliases, schema, operator_types)
-            if isinstance(right_cond, str):
-                right_cond = [right_cond]
-            conditions.extend(right_cond)
+            right_name, right_expr = _extract_conditions(
+                right, aliases, schema, operator_types, anonymize_literal)
+            conditions.append((right_name, right_expr))
         return conditions
-    elif isinstance(expr, exp.Not):
-        # NOT operator
-        # case1: NOT col [op] val
-        # case2: col NOT BETWEEN A AND B
-        # case3: NOT IN (...) / NOT LIKE [string]
-        # case4: IS NOT NULL
-        operator_types.add(exp.Not.key.lower())
-        child = expr.args.get('this')
-        child_cond = _extract_conditions(child, aliases, schema, operator_types) if child else ''
-        child_cond = child_cond.lower()
-
-        is_case1 = False
-        key = None
-        if f' {exp.Between.key.lower()} ' in child_cond:
-            # case2: Replace first occurrence of ' between ' with ' not between '
-            key = f' {exp.Between.key.lower()} '
-        elif f' {exp.In.key.lower()} ' in child_cond:
-            # case3: Replace first occurrence of ' in ' with ' not in '
-            key = f' {exp.In.key.lower()} '
-        elif f' {exp.Like.key.lower()} ' in child_cond:
-            # case3: Replace first occurrence of ' like ' with ' not like '
-            key = f' {exp.Like.key.lower()} '
-        elif f' {exp.Is.key.lower()} ' in child_cond:
-            # case4: Replace first occurrence of ' is ' with ' is not '
-            key = f' {exp.Is.key.lower()} '
-        else:
-            is_case1 = True
-
-        if is_case1:
-            # case 1
-            child_cond = f"{exp.Not.key.lower()} {child_cond}"
-        else:
-            # other cases
-            idx = child_cond.index(key)
-            child_cond = child_cond[:idx] + f' {exp.Not.key.lower()}{key}' + child_cond[idx + len(key):]
-        return child_cond
-    elif isinstance(expr, exp.Between):
-        # BETWEEN operator
-        # T.col between A and B
-        # Between(
-        #   this=Column(
-        #     this=Identifier(this=col, quoted=False),
-        #     table=Identifier(this=T, quoted=False)),
-        #   low=Literal(this=A, is_string=False),
-        #   high=Literal(this=B, is_string=False)
-        # )
-        operator_types.add(exp.Between.key.lower())
-        left = expr.args.get('this')
-        col = _format_expression(left, aliases, schema, remove_alias=True)
-        low = _format_expression(expr.args.get('low'), aliases, schema, remove_alias=True)
-        high = _format_expression(expr.args.get('high'), aliases, schema, remove_alias=True)
-        cond_str = f"{col} between {low} and {high}"
-        return cond_str
     else:
-        # Binary operators or leaf conditions
-        # _format_expression returns a single string like "col = val"
-        cond_str = _format_expression(expr, aliases, schema, remove_alias=True)
+        cond_name, expr = _format_expression(
+            expr, aliases, schema, remove_alias=True, anonymize_literal=anonymize_literal)
 
-        # If it's a binary expression, expr.key is the operator
-        # For simple literals/columns without operators, expr might not be a binary op
-        # But typically conditions have operators.
-        if isinstance(expr, exp.Binary):
+        if isinstance(expr, (exp.Binary, exp.Between, exp.In, exp.Not)):
             op = expr.key.lower()
             operator_types.add(op)
 
-        # Return the condition string as is
-        return cond_str
+        return cond_name, expr
 
-def extract_aggregation(query: exp.Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Tuple[Set[str], Set[Tuple[str, str]]]:
+def extract_aggregation(
+        query: exp.Select, 
+        aliases: Dict[str, Dict[str, str]], 
+        schema: Schema,
+        anonymize_literal: bool=False) -> Tuple[Set[str], Set[Tuple[str, str]]]:
     """
     Extracts information about columns and expressions used in the GROUP BY clause of a query.
 
@@ -604,49 +888,58 @@ def extract_aggregation(query: exp.Select, aliases: Dict[str, Dict[str, str]], s
             )
     """
     unique_columns = set()
-    aggregation_types = set()
+    aggregation_asts = set()
 
     group = query.args.get('group')
     if group:
-        for g in group:
-            columns_in_item = _extract_columns_from_expression(g, aliases, schema)
-            unique_columns.update(columns_in_item)
-            tag = _determine_tag(g)
-            aggregation_types.add((str(g).lower().strip(), tag))
+        for g_expr in group:
+            columns = _extract_columns_from_expression(g_expr, aliases, schema)
+            unique_columns.update(columns)
 
-    return unique_columns, aggregation_types
+            tag = _determine_tag(g_expr)
+            expr_str, expr = _format_expression(g_expr, aliases, schema, remove_alias=True, anonymize_literal=anonymize_literal)
+            aggregation_asts.add((expr_str, expr, tag))
 
-def extract_others(query: exp.Select, aliases: Dict[str, Dict[str, str]], schema: Schema) -> Dict[str, Any]:
+    return unique_columns, aggregation_asts
+
+def extract_orderby(
+        query: exp.Select,
+        aliases: Dict[str, Dict[str, str]],
+        schema: Schema,
+        anonymize_literal: bool=False) -> Set[str]:
+    unique_columns = set()
+    otherby_asts = set()
+
+    order = query.args.get('order')
+    if order and isinstance(order, exp.Order):
+        # order_node.expressions is a list of Ordered expressions
+        for order_expr in order.expressions:
+            # ordered_expr.this is the actual expression being ordered
+            columns = _extract_columns_from_expression(order_expr.this, aliases, schema)
+            unique_columns.update(columns)
+
+            tag = _determine_tag(order_expr)
+            expr_str, expr = _format_expression(order_expr.this, aliases, schema, remove_alias=True, anonymize_literal=anonymize_literal)
+            otherby_asts.add((expr_str, expr, tag))
+
+    return unique_columns, otherby_asts
+
+def extract_others(query: exp.Select) -> Dict[str, bool]:
     """
     Extracts:
-    1. distinct columns (if DISTINCT is present)
-    2. order by columns
-    3. whether LIMIT is used
+    1. whetehr DISTINCT is used
+    2. whether LIMIT is used
     """
-    others = {'distinct': set(), 'order by': set(), 'limit': False}
+    others = {'distinct': False, 'limit': False}
 
     # Check for DISTINCT
-    distinct_node = query.args.get('distinct')
-    if distinct_node and isinstance(distinct_node, exp.Distinct):
-        # DISTINCT applies to all selected columns/expressions
-        # Extract columns from all SELECT expressions
-        for sel_expr in query.select():
-            columns = _extract_columns_from_expression(sel_expr, aliases, schema)
-            others['distinct'].update(columns)
-
-    # Check for ORDER BY
-    order_node = query.args.get('order')
-    if order_node and isinstance(order_node, exp.Order):
-        # order_node.expressions is a list of Ordered expressions
-        for ordered_expr in order_node.expressions:
-            # ordered_expr.this is the actual expression being ordered
-            columns = _extract_columns_from_expression(ordered_expr.this, aliases, schema)
-            others['order by'].update(columns)
+    distinct_node = list(query.find_all(exp.Distinct))
+    if len(distinct_node) > 0:
+        others['distinct'] = True
 
     # Check for LIMIT
-    limit_node = query.args.get('limit')
-    if limit_node and isinstance(limit_node, exp.Limit):
-        # presence of limit node means limit is used
+    limit_node = list(query.find_all(exp.Limit))
+    if len(limit_node) > 0:
         others['limit'] = True
 
     return others
@@ -655,29 +948,33 @@ def extract_all(parsed_query: exp.Expression, schema: Schema) -> Tuple[Set[str],
     """
     Extract all components from a SELECT query.
     """
-    
     aliases = extract_aliases(parsed_query)
     subqueries = get_subqueries(parsed_query)
     results = defaultdict(set)
+    results['distinct'] = False
+    results['limit'] = False
     nested = len(subqueries)
 
     for query in subqueries:
-        sel_cols, sel_types  = extract_selection(query, aliases, schema)
-        conds, op_types = extract_condition(query, aliases, schema)
-        agg_cols, agg_types  = extract_aggregation(query, aliases, schema)
-        others = extract_others(query, aliases, schema)
+        sel_cols, sel_asts  = extract_selection(query, aliases, schema)
+        cond_asts, op_types = extract_condition(query, aliases, schema)
+        agg_cols, agg_asts  = extract_aggregation(query, aliases, schema)
+        orderby_cols, orderby_asts = extract_orderby(query, aliases, schema)
+        others = extract_others(query)
         
         results['sel'].update(sel_cols)
-        results['sel_types'].update(sel_types)
-        results['cond'].update(conds)
+        results['sel_asts'].update(sel_asts)
+        results['cond_asts'].update(cond_asts)
         results['op_types'].update(op_types)
         results['agg'].update(agg_cols)
-        results['agg_types'].update(agg_types)
-        results['distinct'].update(others['distinct'])
-        results['order by'].update(others['order by'])
-        results['limit'] = others['limit']
+        results['agg_asts'].update(agg_asts)
+        results['orderby'].update(orderby_cols)
+        results['orderby_asts'].update(orderby_asts)
+        results['distinct'] |= others['distinct']
+        results['limit'] |= others['limit']
 
     results['nested'] = nested
+    results['subqueries'] = subqueries
 
     return results
 
@@ -744,905 +1041,3 @@ if __name__ == "__main__":
     parsed_query = sqlglot.parse_one(sql1)
     results = extract_all(parsed_query, schema)
     
-# class ControlFlow(BaseModel):
-#     select_seen: bool = Field(default=False)
-#     from_seen: bool = Field(default=False)
-#     join_seen: bool = Field(default=False)
-#     where_seen: bool = Field(default=False)
-#     groupby_seen: bool = Field(default=False)
-#     having_seen: bool = Field(default=False)
-#     orderby_seen: bool = Field(default=False)
-#     limit_seen: bool = Field(default=False)
-
-# def switch_control_flow(token, control_flow: ControlFlow):
-#     if token.ttype is tks.DML and token.value.upper() == 'SELECT':
-#         control_flow.select_seen = True
-
-#     if token.ttype is tks.Keyword and token.value.upper() == 'FROM':
-#         control_flow.select_seen = False
-#         control_flow.from_seen = True
-
-#     if token.ttype is tks.Keyword and token.value.upper() == 'JOIN':
-#         control_flow.select_seen = False
-#         control_flow.from_seen = False
-#         control_flow.join_seen = True
-
-#     if isinstance(token, Where) or (token.ttype is tks.Keyword and token.value.upper() == 'WHERE'):
-#         control_flow.select_seen = False
-#         control_flow.from_seen = False
-#         control_flow.join_seen = False
-#         control_flow.where_seen = True
-        
-#     if token.ttype is tks.Keyword and token.value.upper() == 'GROUP BY':
-#         control_flow.from_seen = False
-#         control_flow.join_seen = False
-#         control_flow.where_seen = False
-#         control_flow.groupby_seen = True
-    
-#     if token.ttype is tks.Keyword and token.value.upper() == 'HAVING':
-#         control_flow.groupby_seen = False
-#         control_flow.having_seen = True
-
-#     if token.ttype is tks.Keyword and token.value.upper() == 'ORDER BY':
-#         control_flow.from_seen = False
-#         control_flow.join_seen = False
-#         control_flow.where_seen = False
-#         control_flow.having_seen = False
-#         control_flow.groupby_seen = False
-#         control_flow.having_seen = False
-#         control_flow.orderby_seen = True
-
-#     if token.ttype is tks.Keyword and token.value.upper() == 'LIMIT':
-#         control_flow.from_seen = False
-#         control_flow.join_seen = False
-#         control_flow.where_seen = False
-#         control_flow.having_seen = False
-#         control_flow.groupby_seen = False
-#         control_flow.having_seen = False
-#         control_flow.orderby_seen = False
-#         control_flow.limit_seen = True
-
-# # def is_actual_keyword(token):
-# #     KEYWORDS = (
-# #         'SELECT', 'FROM', 'JOIN', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT',
-# #         'UNION', 'INTERSECT', 'EXCEPT', 'AS', 'ON', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL',
-# #         'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS', 'NATURAL', 'ASC', 'DESC', 'DISTINCT', 'EXISTS',
-# #         'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'ALL', 'ANY', 'WITH'
-# #     )
-# #     if token.value in KEYWORDS:
-# #         return True
-# #     return False
-
-# def check_keyword_in_token(token):
-#     KEYWORDS = (
-#         'SELECT', 'FROM', 'JOIN', 'WHERE', 'GROUP BY', 'HAVING', 'ORDER BY', 'LIMIT',
-#         'UNION', 'INTERSECT', 'EXCEPT', 'AS', 'ON', 'AND', 'OR', 'NOT', 'IN', 'LIKE', 'BETWEEN', 'IS', 'NULL',
-#         'INNER', 'LEFT', 'RIGHT', 'FULL', 'OUTER', 'CROSS', 'NATURAL', 'ASC', 'DESC', 'DISTINCT', 'EXISTS',
-#         'CASE', 'WHEN', 'THEN', 'ELSE', 'END', 'ALL', 'ANY', 'WITH'
-#     )
-#     for key in KEYWORDS:
-#         if key.lower() in str(token).lower():
-#             return True
-#     return False
-
-
-# def is_pwn(token, only_wn=False):
-#     if only_wn:
-#         rule = (tks.Whitespace, tks.Newline)
-#     else:
-#         rule = (tks.Punctuation, tks.Whitespace, tks.Newline)
-#     if token.ttype in rule:
-#         return True
-#     return False
-
-# def is_set_operator(token):
-#     if token.ttype is tks.Keyword and token.value.upper() in ('UNION', 'INTERSECT', 'EXCEPT'):
-#         return True
-#     return False
-
-# def is_subquery(tokens: Parenthesis|Identifier):
-#     for token in tokens:
-#         if token.ttype is tks.DML and token.value.upper() == 'SELECT':
-#             return True
-#     return False
-
-# def split_set_operation(statement: Statement) -> list[Statement]:
-#     """
-#     Checks if the statement contains a set operation.
-#     """
-#     is_set = False
-#     statement1 = []
-#     statement2 = []
-#     tokens = statement.tokens
-#     for i, token in enumerate(tokens):
-#         if is_set_operator(token):
-#             break
-#         else:
-#             if isinstance(token, Where):
-#                 # only where clause has a subquery form
-#                 for j, sub_token in enumerate(token.tokens):
-#                     if is_set_operator(sub_token):
-#                         is_set = True
-#                         break
-#                     else:
-#                         statement1.append(sub_token)
-#             else:
-#                 statement1.append(token)
-
-#     if is_set:
-#         statement2 = token.tokens[j+1:]
-#     else:
-#         is_set_new = False
-#         for i, token in enumerate(tokens):
-#             if is_set_operator(token):
-#                 is_set_new = True
-#                 break
-#         if is_set_new:
-#             statement2 = tokens[i+1:]
-
-#     # post process the statement
-#     if is_pwn(statement1[-1]):
-#         statement1 = statement1[:-1]
-#     if statement2 and is_pwn(statement2[0]):
-#         statement2 = statement2[1:]
-    
-#     if statement2:
-#         return [Statement(statement1), Statement(statement2)]
-#     return [Statement(statement1)]
-
-# # --------------------------------------------------------------------------------------------
-# # Extracting Aliases
-# # --------------------------------------------------------------------------------------------
-
-# def extract_aliases(statement: Statement) -> dict[str, dict[str, str]]:
-#     """
-#     Extracts a mapping of table & column aliases to their actual table names from the SQL statement.
-
-#     Assumptions:
-#     - Only table names have aliases.
-#     - Subqueries can occur in WHERE and HAVING clauses.
-#     - Only one set operation or subquery can occur.
-#     """
-#     alias_mapping = {'table': {}, 'column': {}}
-#     # Handle set operations
-#     statements = split_set_operation(statement)
-
-#     for stmt in statements:
-#         extract_alias(stmt, alias_mapping, ControlFlow())
-#     return alias_mapping
-
-# def process_token_alias(token, alias_mapping: dict[str, dict[str, str]], alias_str: str):
-#     alias_str2func = {
-#         'column': extract_alias_column_name,
-#         'table': extract_alias_table_name
-#     }
-#     func = alias_str2func[alias_str]
-#     if isinstance(token, IdentifierList):
-#         for identifier in token.get_identifiers():
-#             if isinstance(identifier, (Identifier, Function)):
-#                 # If it's an Identifier or Function, we can check for subqueries
-#                 # safely because these have a .tokens attribute.
-#                 if (identifier.tokens and isinstance(identifier.tokens[0], Parenthesis)
-#                         and is_subquery(identifier.tokens[0])):
-#                     extract_alias(identifier.tokens[0], alias_mapping, control_flow=ControlFlow())
-#                 func(identifier, alias_mapping[alias_str])
-#             elif isinstance(identifier, Parenthesis):
-#                 # Handle subqueries inside parentheses if any
-#                 subqueries = extract_subqueries([identifier])
-#                 if subqueries:
-#                     for sub_statement in subqueries:
-#                         extract_alias(sub_statement, alias_mapping, control_flow=ControlFlow())
-#                 # If needed, process this as a table/column afterwards
-#                 # func(identifier, alias_mapping[alias_str]) # only if makes sense
-#             elif isinstance(identifier, Token):
-#                 # It's just a single token column name
-#                 # Convert it into an Identifier-like object for consistency
-#                 # or handle directly.
-#                 if identifier.ttype in (tks.Name, Identifier):
-#                     # Wrap in Identifier for uniform handling
-#                     single_identifier = Identifier([identifier])
-#                     func(single_identifier, alias_mapping[alias_str])
-#                 else:
-#                     # If it's not a name or identifier type, handle accordingly
-#                     pass
-#     elif isinstance(token, (Identifier, Function)):
-#         if isinstance(token[0], Parenthesis) and is_subquery(token[0]):
-#             # Handle subquearies in with alias
-#             extract_alias(token[0], alias_mapping, control_flow=ControlFlow())
-#         func(token, alias_mapping[alias_str])
-#     elif isinstance(token, Parenthesis):
-#         # Handle subqueries with no alias
-#         subqueries = extract_subqueries([token])
-#         if subqueries:
-#             for sub_statement in subqueries:
-#                 extract_alias(sub_statement, alias_mapping, control_flow=ControlFlow())
-#         # func(token, alias_mapping[alias_str])
-#     elif isinstance(token, (Where, Comparison)):
-#         if token.value.upper() != 'WHERE':
-#             for sub_token in token.tokens:
-#                 if isinstance(sub_token, Parenthesis) and is_subquery(sub_token):
-#                     # Handle subqueries in where clause
-#                     extract_alias(sub_token, alias_mapping, control_flow=ControlFlow())
-#     else:
-#         # Other tokens
-#         pass
-
-# def extract_alias(
-#         stmt, 
-#         alias_mapping: dict[str, dict[str, str]], 
-#         control_flow: ControlFlow
-#     ):
-#     if isinstance(stmt, Statement):
-#         iterator = stmt.tokens
-#     else:
-#         iterator = stmt
-
-#     for token in iterator:
-#         # Skip comments and whitespace
-#         if token.is_whitespace or token.ttype in (sqlparse.tokens.Newline,):
-#             continue
-        
-#         switch_control_flow(token, control_flow)
-
-#         if control_flow.select_seen or control_flow.having_seen:
-#             process_token_alias(token, alias_mapping, 'column')
-#         elif control_flow.from_seen or control_flow.join_seen:
-#             process_token_alias(token, alias_mapping, 'table')
-#         elif control_flow.where_seen:
-#             process_token_alias(token, alias_mapping, 'column')
-#             if isinstance(token, (Where, Comparison)):
-#                 process_token_alias(token, alias_mapping, 'table')
-#         else:
-#             pass
-     
-# def extract_alias_column_name(identifier, alias_column: dict):
-#     """
-#     Processes an identifier to extract column name and alias.
-#     """
-#     column_components = []
-#     alias = identifier.get_alias()
-
-#     if alias is None:
-#         column_components.append(identifier)
-#     else:
-#         # col as alias, col alias
-#         for x in identifier:
-#             if x.ttype is tks.Keyword and x.value.upper() == 'AS':
-#                 break
-#             else:
-#                 column_components.append(x)
-#         if column_components[-1].value == alias:
-#             column_components = column_components[:-2]
-
-#     column = format_column(column_components)
-#     alias = alias.lower() if alias is not None else None
-
-#     key = column if alias is None else alias
-#     if key == column:
-#         return None
-#     elif alias_column.get(key) is None:
-#         alias_column[key] = column
-#     elif alias is not None:
-#         raise ValueError(f'Alias {alias} already exists in the column mapping.\n{alias_column}')
-
-# def format_column(column_components: list[Token]) -> str:
-#     tokens = []
-#     for token in TokenList(column_components).flatten():
-#         if token.ttype is tks.Literal.String.Single:
-#             tokens.append(str(token))
-#         else:
-#             tokens.append(str(token).lower())
-            
-#     column = ''.join(tokens).strip()
-#     return column
-
-# def extract_alias_table_name(identifier, alias_table: dict):
-#     """
-#     Processes an identifier to extract table name and alias.
-#     """
-#     alias = identifier.get_alias()
-#     if isinstance(identifier[0], Parenthesis):
-#         table_name = format_column(identifier[0].tokens)
-#     else:
-#         table_name = identifier.get_real_name().lower()
-
-#     if alias:
-#         alias_table[alias.lower()] = table_name
-#     else:
-#         alias_table[table_name] = table_name
-
-# def extract_subqueries(tokens):
-#     subqueries = []
-#     for token in tokens:
-#         if isinstance(token, Parenthesis):
-#             inner_tokens = token.tokens
-#             # Check if the first meaningful token is a SELECT statement
-#             for i, t in enumerate(inner_tokens):
-#                 if t.ttype in (tks.Punctuation, tks.Whitespace, tks.Newline):
-#                     continue
-#                 if t.ttype is tks.DML and t.value.upper() == 'SELECT':
-#                     # Found a subquery
-#                     subquery = inner_tokens[i:]
-#                     if subquery[-1].value == ')':
-#                         subquery = subquery[:-1]
-#                     subqueries.append(Statement(subquery))
-#                     break
-#     return subqueries
-
-# def get_source_tables(aliases: dict[str, dict[str, str]]) -> list[str]:
-#     source_tables = set()
-#     for value in aliases['table'].values():
-#         if '(' in value:
-#             continue
-#         source_tables.add(value)
-#     return source_tables
-
-# # --------------------------------------------------------------------------------------------
-# # Extracting Selections
-# # --------------------------------------------------------------------------------------------
-
-# def extract_selection(statement: Statement, aliases: dict[str, dict[str, str]], schema: Schema) -> tuple[set, set]:
-#     """
-#     Extracts following information that used in the SELECT clause.
-#     (1) Number of expressions used. 
-#     (2) Number of logical calculations, functions used 
-#         - simple column part '<s>', 
-#         - calculation part '<c>'
-#         - function part '<a>'
-
-#     Assumptions:
-#     - Only table names have aliases.
-#     - Subqueries can occur in WHERE and HAVING clauses.
-#     - Only one set operation or subquery can occur.
-#     """
-#     statements = split_set_operation(statement)
-#     unique_columns = set()
-#     selection_types = set()
-#     for stmt in statements:
-#         extract_select(stmt, aliases, schema, unique_columns, selection_types, ControlFlow())
-#     return unique_columns, selection_types
-
-# def extract_select(
-#         stmt: Statement, 
-#         aliases: dict[str, dict[str, str]], 
-#         schema: Schema,
-#         unique_columns: set, 
-#         selection_types: set,
-#         control_flow: ControlFlow
-#     ):
-#     """
-#     Extracts columns and partial selections from the SELECT clause of the statement.
-#     """
-#     if isinstance(stmt, Statement):
-#         iterator = stmt.tokens
-#     else:
-#         iterator = stmt
-
-#     for token in iterator:
-#         if token.is_whitespace or token.ttype in (tks.Newline, tks.Whitespace):
-#             continue
-
-#         switch_control_flow(token, control_flow)
-
-#         if control_flow.select_seen:
-#             if is_pwn(token):
-#                 continue
-            
-#             if isinstance(token, IdentifierList):
-#                 for identifier in token.get_identifiers():
-#                     print(identifier, identifier.ttype, type(identifier))
-#                     if isinstance(identifier, Parenthesis):
-#                         if is_subquery([identifier]):
-#                             # Handle subqueries if has alias
-#                             extract_select([identifier], aliases, schema, unique_columns, selection_types, control_flow=ControlFlow())
-#                         else:
-#                             extract_select(identifier, aliases, schema, unique_columns, selection_types, control_flow=control_flow)
-#                     else:
-#                         process_item(identifier, aliases, schema, unique_columns, selection_types)
-#             elif isinstance(token, (Identifier, Function)):
-#                 if is_subquery([token]):
-#                     # Handle subqueries if has alias
-#                     extract_select(token[0], aliases, schema, unique_columns, selection_types, control_flow=ControlFlow())
-#                 else:
-#                     process_item(token, aliases, schema, unique_columns, selection_types)
-#             elif isinstance(token, Parenthesis):
-#                 subqueries = extract_subqueries([token])
-#                 if subqueries:
-#                     for sub_statement in subqueries:
-#                         extract_select(sub_statement, aliases, schema, unique_columns, selection_types, control_flow=ControlFlow())
-#                 else:
-#                     for sub_token in token.tokens:
-#                         print(sub_token, sub_token.ttype, type(sub_token))
-#                         if is_pwn(sub_token):
-#                             continue
-#                         extract_select(sub_token, aliases, schema, unique_columns, selection_types, control_flow=control_flow)
-#                 #     process_item(token, aliases, schema, unique_columns, selection_types)
-#             elif not check_keyword_in_token(token):
-#                 print(token, token.ttype, type(token))
-#                 process_item(token, aliases, schema, unique_columns, selection_types)
-#             else:
-#                 # Token
-#                 pass
-                
-# def process_item(token, aliases: dict[str, dict[str, str]], schema: Schema, unique_columns: set, types: set):
-#     """
-#     Processes an item and updates unique_columns and types.
-#     Extracts following information.
-#     (1) Number of expressions used. 
-#     (2) Number of logical calculations, functions used 
-#         - simple column part '<s>', 
-#         - calculation part '<c>'
-#         - aggregate function part '<a>'
-#     """
-#     tag = None
-#     expression = []
-#     if isinstance(token, Function):
-#         # It's a function
-#         columns_in_item = extract_columns_from_expression(token, aliases, schema, expression)
-#         unique_columns.update(columns_in_item)
-#         tag = '<a>' if is_aggregate_function(token) else '<c>'
-#     elif isinstance(token, Identifier):
-#         # Simple column or Fucntion with column
-#         if isinstance(token[0], Function):  # alias
-#             columns_in_item = extract_columns_from_expression(token[0], aliases, schema, expression)
-#             unique_columns.update(columns_in_item)
-#             tag = '<a>' if is_aggregate_function(token[0]) else '<c>'
-#         elif token.value.lower() in aliases['column']:
-#             new_token = sqlparse.parse(aliases['column'][token.value.lower()])[0].tokens[0]
-#             process_item(new_token, aliases, schema, unique_columns, types)
-#         else:
-#             # column_name = get_full_column_name(token, aliases, schema)
-#             # unique_columns.add(column_name)
-#             # tag = '<s>'
-#             columns_in_item = extract_columns_from_expression(token, aliases, schema, expression)
-#             unique_columns.update(columns_in_item)
-#             tag = '<s>'
-#     elif isinstance(token, Operation):
-#         # Operation
-#         columns_in_item = extract_columns_from_expression(token, aliases, schema, expression)
-#         unique_columns.update(columns_in_item)
-#         tag = '<c>'
-#     elif isinstance(token, Parenthesis):
-#         # operation or subquery
-#         subqueries = extract_subqueries([token])
-#         if subqueries:
-#             for sub_statement in subqueries:
-#                 process_item(sub_statement, aliases, schema, unique_columns, types)
-#         else:
-#             for sub_token in token.tokens:
-#                 if is_pwn(sub_token):
-#                     continue
-#                 process_item(sub_token, aliases, schema, unique_columns, types)
-#     else:
-#         # Other tokens
-#         pass
-#     # Get the token string
-#     if tag:
-#         selection_text = str(''.join(expression)).strip().lower()  # token
-#         types.update([(selection_text, tag)])
-
-# def get_full_column_name(token, aliases: dict[str, dict[str, str]], schema: Schema) -> str:
-#     """
-#     Returns the fully qualified column name (table.column) from a token.
-#     """
-#     if isinstance(token, Identifier):
-#         column_name = token.get_real_name().lower()
-#         if aliases['column'].get(column_name):
-#             real_column_name = aliases['column'][column_name]
-#         else:
-#             real_column_name = column_name
-
-#         table_alias = token.get_parent_name().lower() if token.get_parent_name() else token.get_parent_name()  # None for *
-#         if table_alias:
-#             real_table_name = aliases['table'].get(table_alias)
-#         else:
-#             real_table_name = schema.get_table_name(column_name, tables=list(aliases['table'].values()))
-            
-#         if real_table_name:
-#             key = f"{real_table_name}.{real_column_name}"
-#         else:
-#             key = f"{real_column_name}"
-
-#         try: 
-#             return schema.idMap[key]
-#         except:
-#             return '__' + key + '__'
-#     elif token.ttype is tks.Wildcard:
-#         return schema.idMap['*']
-#     else:
-#         assert False, f"Unexpected token type: {type(token), token.ttype} - {token}"
-    
-# def extract_columns_from_expression(token, aliases: dict[str, str], schema: Schema, expression: list) -> set:
-#     """
-#     Recursively extracts column names from an expression.
-#     """
-#     columns = set()
-#     print(token, token.ttype, type(token))
-#     if isinstance(token, Identifier) or token.ttype is tks.Wildcard:
-#         if 'DESC' in str(token):
-#             # no column in order by desc
-#             expression.append(str(token))
-#         else:
-#             column_name = get_full_column_name(token, aliases, schema)
-#             columns.add(column_name)
-#             expression.append(column_name)
-#     elif isinstance(token, IdentifierList):
-#         for identifier in token.get_identifiers():
-#             columns.update(extract_columns_from_expression(identifier, aliases, schema, expression))
-#     elif isinstance(token, Function):
-#         expression.append(str(token[0]).lower())
-#         for sub_token in token.tokens[1:]:
-#             columns.update(extract_columns_from_expression(sub_token, aliases, schema, expression))
-#     elif isinstance(token, (Operation, Parenthesis)):
-#         for sub_token in token.tokens:
-#             columns.update(extract_columns_from_expression(sub_token, aliases, schema, expression))
-#     elif not check_keyword_in_token(token):
-#         # check if it is a keyword, FIRST, LAST, etc.
-#         columns.update(extract_columns_from_expression(sub_token, aliases, schema, expression))
-#     else:
-#         # Other tokens, possibly operators or literals
-#         expression.append(str(token))
-#     return columns
-
-# def is_aggregate_function(token):
-#     """
-#     Determines if the function is an aggregate function.
-#     """
-#     AGG_OPS = ('max', 'min', 'count', 'sum', 'avg', 'stddev', 'variance')
-#     if isinstance(token, (Function, Identifier)):
-#         function_name = token.get_name()
-#         if function_name:
-#             return function_name.lower() in AGG_OPS
-#     return False
-
-# # --------------------------------------------------------------------------------------------
-# # Extracting Conditions
-# # --------------------------------------------------------------------------------------------
-
-# def extract_condition(
-#         statement: Statement, 
-#         aliases: dict[str, dict[str, str]], 
-#         schema: Schema
-#     ) -> tuple[set, set]:
-#     """
-#     Extracts following information that used in the WHERE and HAVING clause.
-#     (1) the number of conditions used
-#     (2) the number of kinds of conditions used
-
-#     WHERE_OPS = ('not', 'between', '=', '>', '<', '>=', '<=', '!=', '<>', 'in', 'like', 'is', 'exists')
-
-#     Assumptions:
-#     - Only table names have aliases.
-#     - Subqueries can occur in WHERE and HAVING clauses.
-#     - Only one set operation or subquery can occur.
-#     """
-#     statements = split_set_operation(statement)
-#     operator_types = set()
-#     conditions = []
-#     for stmt in statements:
-#         extract_where_having(stmt, conditions, ControlFlow())
-#         extract_operation_types(conditions, operator_types)
-#     conditions = formating_conditions(conditions, aliases, schema)
-#     conditions = [sqlparse.format(str(c), reindent=True).strip() for c in conditions]
-#     conditions = set(sorted(conditions))
-#     return conditions, operator_types
-
-# def process_where_having(token, cond: list, conditions: list, between_seen: bool=False):
-#     if isinstance(token, Comparison):
-#         conditions.append(token)
-#     elif isinstance(token, Parenthesis):
-#         # two cases: subquery or expression  (a or/and b)
-#         subqueries = extract_subqueries([token])
-#         if subqueries:
-#             for sub_statement in subqueries:
-#                 # get WHERE clause
-#                 sub_where = extract_where_having(sub_statement, conditions, control_flow=ControlFlow())
-#                 if sub_where:
-#                     conditions.append(sub_where)
-#         else:
-#             for sub_token in token.tokens:
-#                 process_where_having(sub_token, cond, conditions, between_seen)
-#     elif (token.ttype is tks.Keyword and token.value.upper() == 'WHERE'):
-#         pass
-#     elif isinstance(token, Where) and token.value != 'WHERE':
-#         # means there are something under the WHERE clause
-#         for sub_token in token.tokens:
-#             process_where_having(sub_token, cond, conditions, between_seen)
-#     else:
-#         if not is_pwn(token):
-#             if between_seen or (token.value not in ('AND', 'OR')):
-#                 # between -> add AND or OR
-#                 cond.extend([token, Token(tks.Whitespace, ' ')])
-    
-# def extract_where_having(stmt, conditions: list, control_flow: ControlFlow):
-#     between_seen = False   
-#     cond = []
-
-#     if isinstance(stmt, Statement):
-#         iterator = stmt.tokens
-#     else:
-#         iterator = stmt
-
-#     for token in iterator:
-#         if token.is_whitespace or token.ttype in (tks.Newline, tks.Whitespace):
-#             continue
-        
-#         switch_control_flow(token, control_flow)
-
-#         if control_flow.where_seen or control_flow.having_seen:
-#             if token.ttype is tks.Keyword and token.value.upper() == 'BETWEEN':
-#                 between_seen = True
-#             # print(token, token.ttype, type(token), control_flow.where_seen, control_flow.having_seen)
-#             process_where_having(token, cond, conditions, between_seen)
-#             # print('-->', str(TokenList(cond)))
-            
-#             if (token.ttype is tks.Keyword) and (token.value.upper() in ('AND', 'OR')) and (not between_seen):
-#                 if cond:
-#                     conditions.append(format_cond(cond))
-#                 cond = []
-#                 between_seen = False
-                
-#                 continue
-            
-#     if cond:
-#         # if there only one condition
-#         conditions.append(format_cond(cond))
-
-# def format_cond(cond: list) -> Comparison:
-#     if len(cond) >= 2 and cond[-1].ttype is tks.Whitespace:
-#         cond = cond[:-1]
-#     return Comparison(cond)
-
-# def get_operation_type(token):
-#     """
-#     Determines if the function is an aggregate function.
-#     """
-#     WHERE_OPS = ('not', 'between', '=', '>', '<', '>=', '<=', '!=', '<>', 'in', 'like', 'is', 'exists')
-#     if token.ttype in (tks.Comparison, tks.Keyword):
-#         op_name = token.value.lower()
-#         if op_name and op_name in WHERE_OPS:
-#             return op_name
-#     return None
-
-# def extract_operation_types(conditions: list, operator_types: set):
-#     for cs in conditions:
-#         ops = []
-#         for c in cs:
-#             if is_pwn(c):
-#                 continue
-#             op = get_operation_type(c)
-#             if op:
-#                 ops.append(op)
-#         operator_types.add(' '.join(ops))
-
-# def formating_conditions(
-#         conditions: list[Comparison], 
-#         aliases: dict[str, dict[str, str]],
-#         schema: Schema
-#     ) -> list[str]:
-#     conditions_str = []
-#     for cs in conditions:
-#         token_list = []
-#         for token in cs:
-#             if isinstance(token, Identifier):
-#                 token_list.append(get_full_column_name(token, aliases, schema))
-#             else:
-#                 token_list.append(str(token))
-#         conditions_str.append(''.join(token_list))
-#     return conditions_str
-
-
-# # --------------------------------------------------------------------------------------------
-# # Extracting Aggregations
-# # --------------------------------------------------------------------------------------------
-
-# def extract_aggregation(statement: Statement, aliases: dict[str, str], schema: Schema):
-#     """
-#     Extracts following information that used in the GROUP BY clause.
-#     (1) Number of expressions used. 
-#     (2) Number of logical calculations, functions used
-#         - simple column part '<s>', 
-#         - calculation part '<c>'
-#         - aggregate function part '<a>'
-
-#     Assumptions:
-#     - Only table names have aliases.
-#     - Subqueries can occur in WHERE and HAVING clauses.
-#     - Only one set operation or subquery can occur.
-#     """
-#     statements = split_set_operation(statement)
-#     unique_columns = set()
-#     aggregation_types = set()
-#     for stmt in statements:
-#         extract_group_by(stmt, aliases, schema, unique_columns, aggregation_types, ControlFlow())
-#     return unique_columns, aggregation_types
-
-# def extract_group_by(
-#         stmt: Statement, 
-#         aliases: dict[str, str], 
-#         schema: Schema, 
-#         unique_columns: set, 
-#         aggregation_types: set,
-#         control_flow: ControlFlow
-#     ):
-#     if isinstance(stmt, Statement):
-#         iterator = stmt.tokens
-#     else:
-#         iterator = stmt
-
-#     for token in iterator:
-#         if token.is_whitespace or token.ttype in (tks.Newline, tks.Whitespace):
-#             continue
-        
-#         switch_control_flow(token, control_flow)
-
-#         if control_flow.groupby_seen:
-#             if is_pwn(token):
-#                 continue
-#             # Process the GROUP BY items
-#             if isinstance(token, IdentifierList):
-#                 # Multiple items in GROUP BY
-#                 for identifier in token.get_identifiers():
-#                     process_item(identifier, aliases, schema, unique_columns, aggregation_types)
-#             elif isinstance(token, (Identifier, Function, Parenthesis)):
-#                 # Single item in GROUP BY
-#                 process_item(token, aliases, schema, unique_columns, aggregation_types)
-#             else:
-#                 # Handle other cases if needed
-#                 pass
-
-# # --------------------------------------------------------------------------------------------
-# # Extracting Nested Queries
-# # --------------------------------------------------------------------------------------------
-
-# def extract_nested_setoperation(statement: Statement) -> int:
-#     """
-#     Extracts number of nested queries in the SQL statement(include set operation).
-#     number of nested queries + number of set operation queries
-#     Assumptions:
-#     - Only table names have aliases.
-#     - Subqueries can occur in WHERE and HAVING clauses.
-#     - Only one set operation or subquery can occur.
-#     """
-#     statements = split_set_operation(statement)
-#     nested = 0
-#     if len(statements) > 1:
-#         nested += len(statements)
-#     for stmt in statements:    
-#         nested = extract_nested(stmt, nested, ControlFlow())
-#     return nested
-
-# def extract_nested(stmt, nested: int, control_flow: ControlFlow):
-
-#     if isinstance(stmt, Statement):
-#         iterator = stmt.tokens
-#     else:
-#         iterator = stmt
-
-#     for token in iterator:
-#         # Skip comments and whitespace
-#         if token.is_whitespace or token.ttype in (sqlparse.tokens.Newline,):
-#             continue
-
-#         switch_control_flow(token, control_flow)
-        
-#         if control_flow.select_seen or control_flow.from_seen or control_flow.join_seen or control_flow.having_seen:
-#             if isinstance(token, Parenthesis):
-#                 subqueries = extract_subqueries([token])
-#                 nested += len(subqueries)
-#         elif control_flow.where_seen:
-#             # print(token, token.ttype, type(token))
-#             if isinstance(token, Where) and token.value.upper() != 'WHERE':
-#                 for sub_token in token.tokens:
-#                     if isinstance(sub_token, Parenthesis) and is_subquery(sub_token):
-#                         subqueries = extract_subqueries([sub_token])
-#                         nested += len(subqueries)
-#                 # nested += len(subqueries)
-#             elif isinstance(token, Comparison):
-#                 for sub_token in token.tokens:
-#                     if isinstance(sub_token, Parenthesis) and is_subquery(sub_token):
-#                         subqueries = extract_subqueries([sub_token])
-#                         nested += len(subqueries)
-#             elif isinstance(token, Parenthesis) and is_subquery(token):
-#                 subqueries = extract_subqueries([token])
-#                 if subqueries:
-#                     nested += len(subqueries)
-#                 else:
-#                     for sub_token in token.tokens:
-#                         nested = extract_nested(sub_token, nested, control_flow)
-#             elif (token.ttype is tks.Keyword and token.value.upper() == 'WHERE'):
-#                 pass
-#             else:
-#                 pass
-#     return nested
-
-# # --------------------------------------------------------------------------------------------
-# # Extracting Others
-# # --------------------------------------------------------------------------------------------
-
-# def extract_others(statement: Statement, aliases: dict[str, dict[str, str]], schema: Schema) -> dict[str, set|bool]:
-#     """
-#     Extracts following information that used in the WHERE and HAVING clause.
-#     (1) the columns that are used with DISTINCT
-#     (2) the columns that are used in ORDER BY
-#     (3) whether the LIMIT used
-
-#     WHERE_OPS = ('not', 'between', '=', '>', '<', '>=', '<=', '!=', '<>', 'in', 'like', 'is', 'exists')
-
-#     Assumptions:
-#     - Only table names have aliases.
-#     - Subqueries can occur in WHERE and HAVING clauses.
-#     - Only one set operation or subquery can occur.
-#     """
-#     # control_flow = ControlFlow()
-#     others = {'distinct': set(), 'order by': set(), 'limit': False}
-#     statements = split_set_operation(statement)
-#     for stmt in statements:
-#         others = extract_distinct_orderby_limit(stmt, aliases, schema, others)
-#     return others
-
-# def extract_distinct_orderby_limit(
-#         stmt: Statement, 
-#         aliases: dict[str, dict[str, str]],
-#         schema: Schema,
-#         others: dict[str, set|bool],
-#     ):
-#     distinct_used = False
-#     order_by_used = False
-#     orderby_tokens = []
-#     ord = []
-#     for token in stmt.flatten():
-#         if token.ttype is tks.Keyword:
-#             if token.value.upper() == 'DISTINCT':
-#                 distinct_used = True
-#                 continue
-#             if token.value.upper() == 'ORDER BY':
-#                 ord = []
-#                 order_by_used = True
-#                 continue
-#             if token.value.upper() == 'LIMIT':
-#                 order_by_used = False
-#                 others['limit'] = True
-#                 continue
-        
-#         if distinct_used:
-#             if is_pwn(token):
-#                 continue
-#             column_name = get_full_column_name(Identifier([token]), aliases, schema)
-#             others['distinct'].add(column_name)
-#             distinct_used = False
-
-#         if order_by_used:            
-#             if token.ttype is tks.Punctuation and token.value == ',':
-#                 if sqlparse.parse(str(TokenList(ord))):
-#                     orderby_tokens.append(get_orderby_expression(ord, aliases, schema))
-#                 ord = []
-#             else:
-#                 ord.append(token)
-
-#     if ord and sqlparse.parse(str(TokenList(ord))):
-#         orderby_tokens.append(get_orderby_expression(ord, aliases, schema))
-#     others['order by'].update(orderby_tokens)
-#     return others
-
-# def get_orderby_expression(ord: list, aliases: dict[str, dict[str, str]], schema: Schema) -> str:
-#     expression = []
-#     for tkn in sqlparse.parse(str(TokenList(ord)))[0].tokens:
-#         _ = extract_columns_from_expression(tkn, aliases, schema, expression)
-#     return str(''.join(expression)).strip().lower()
-
-# if __name__ == '__main__':
-#     sql = 'SELECT t1.a, b AS bb, c FROM table1 t1 WHERE a > 10 AND b < 20'
-#     statement = sqlparse.parse(sql)[0]
-#     aliases = extract_aliases(statement)
-#     schema = Schema(
-#         schema={
-#             'table1': ['a', 'b', 'c']
-#         }
-#     )
-#     print(aliases)
-#     print(extract_selection(statement, aliases, Schema()))
-#     print(extract_condition(statement, aliases, Schema()))
-#     print(extract_aggregation(statement, aliases, Schema()))
-#     print(extract_nested_setoperation(statement))
-#     print(extract_others(statement, aliases, Schema()))

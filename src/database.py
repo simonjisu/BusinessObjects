@@ -46,7 +46,7 @@ class SqliteDatabase(Database):
         tables = self.execute(query)['name'].values.tolist()
         table_cols = {}
         for table in tables:
-            query = f'PRAGMA table_info({table});'
+            query = f'PRAGMA table_info(`{table}`);'
             df = self.execute(query)
             table_cols[table] = df['name'].values.flatten().tolist()
         return table_cols

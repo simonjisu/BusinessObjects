@@ -121,6 +121,15 @@ wheels = [
 ]
 
 [[package]]
+name = "apted"
+version = "1.0.3"
+source = { registry = "https://pypi.org/simple" }
+sdist = { url = "https://files.pythonhosted.org/packages/e0/29/3a42b2fb26272a464a9fbf455928a7e4255efa2e6f56679e9c0adaaf798a/apted-1.0.3.tar.gz", hash = "sha256:befa5181e2d4457fa88e54995a82604ee048bb2fbc781ea97d8e1856b4715ce9", size = 24547 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/b9/71/c2bcf92376d3ae65d57111d33f577aca68d343e1b7b1914a3767bfbac18e/apted-1.0.3-py3-none-any.whl", hash = "sha256:74193369d023649d335269e67c4df07f922959e5ac2597de1b79af4e694150e8", size = 40566 },
+]
+
+[[package]]
 name = "asttokens"
 version = "2.4.1"
 source = { registry = "https://pypi.org/simple" }
@@ -178,6 +187,7 @@ name = "businesslake"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
+    { name = "apted" },
     { name = "datasets" },
     { name = "duckdb" },
     { name = "faiss-cpu" },
@@ -206,10 +216,12 @@ dependencies = [
     { name = "torch" },
     { name = "tqdm" },
     { name = "transformers" },
+    { name = "zss" },
 ]
 
 [package.metadata]
 requires-dist = [
+    { name = "apted", specifier = ">=1.0.3" },
     { name = "datasets", specifier = ">=3.0.0" },
     { name = "duckdb", specifier = ">=1.1.0" },
     { name = "faiss-cpu", specifier = ">=1.8.0.post1" },
@@ -238,6 +250,7 @@ requires-dist = [
     { name = "torch", specifier = ">=2.4.1" },
     { name = "tqdm", specifier = ">=4.66.5" },
     { name = "transformers", specifier = ">=4.44.2" },
+    { name = "zss", specifier = ">=1.2.0" },
 ]
 
 [[package]]
@@ -3402,3 +3415,12 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/66/9e/05d133e7523035517e0dc912a59779dcfd5e978aff32c1c2a3cbc1fd4e7c/yarl-1.13.0-cp313-cp313-win_amd64.whl", hash = "sha256:08a3b0b8d10092dade46424fe775f2c9bc32e5a985fdd6afe410fe28598db6b2", size = 493756 },
     { url = "https://files.pythonhosted.org/packages/10/ae/c3c059042053b92ae25363818901d0634708a3a85048e5ac835bd547107e/yarl-1.13.0-py3-none-any.whl", hash = "sha256:c7d35ff2a5a51bc6d40112cdb4ca3fd9636482ce8c6ceeeee2301e34f7ed7556", size = 39813 },
 ]
+
+[[package]]
+name = "zss"
+version = "1.2.0"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "six" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/1e/d1/ed34d12f55d07cc1efb61d74fb2f64f46a705557f5bdd1ef1b810f0e2ec5/zss-1.2.0.tar.gz", hash = "sha256:07bb937441929ccb82961f4f7b80fbce9e2b20d0e46ddcbcbc1fcb094f585b50", size = 9790 }

@@ -20,39 +20,40 @@ def get_data_dict(database: dict) -> dict[str, dict|list]:
         if i == -1:
             continue
         
-        table_name = database['table_names_original'][i]
+        table_name = database['table_names_original'][i].lower()
         table_name_exp = database['table_names'][i]
         col_type = database['column_types'][i]
+        col_name = col.lower()
         
         if data_dict['schema'].get(table_name) is None:
             data_dict['schema'][table_name] = {}
-        if col not in data_dict['schema'][table_name]:
-            data_dict['schema'][table_name][col] = col_type
+        if col_name not in data_dict['schema'][table_name]:
+            data_dict['schema'][table_name][col_name] = col_type
 
         if data_dict['col_explanation'].get(table_name) is None:
             data_dict['col_explanation'][table_name] = {}
-        if data_dict['col_explanation'][table_name].get(col) is None:
-            data_dict['col_explanation'][table_name][col] = col_exp
+        if data_dict['col_explanation'][table_name].get(col_name) is None:
+            data_dict['col_explanation'][table_name][col_name] = col_exp
 
     for i, j in database['foreign_keys']:
         table_index1, col_name1 = database['column_names_original'][i]
         table_index2, col_name2 = database['column_names_original'][j]
         table_name1 = database['table_names_original'][table_index1]
         table_name2 = database['table_names_original'][table_index2]
-        fk = f'{table_name1}.{col_name1} = {table_name2}.{col_name2}'
+        fk = f'{table_name1}.{col_name1} = {table_name2}.{col_name2}'.lower()
         data_dict['foreign_keys'].append(fk)
 
     for i in database['primary_keys']:
         if isinstance(i, int):
             table_index, col_name = database['column_names_original'][i]
             table_name = database['table_names_original'][table_index]
-            pk = f'{table_name}.{col_name}'
+            pk = f'{table_name}.{col_name}'.lower()
             data_dict['primary_keys'].append(pk)
         else:
             for j in i:
                 table_index, col_name = database['column_names_original'][j]
                 table_name = database['table_names_original'][table_index]
-                pk = f'{table_name}.{col_name}'
+                pk = f'{table_name}.{col_name}'.lower()
             data_dict['primary_keys'].append(pk)
     return data_dict
 
