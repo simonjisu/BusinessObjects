@@ -1,0 +1,1 @@
+SELECT SUM(l_extendedprice * (1 - l_discount)) AS revenue FROM lineitem T1 JOIN part T2 ON T1.L_PARTKEY = T2.P_PARTKEY WHERE T2.P_TYPE LIKE 'PROMO' AND T1.L_SHIPDATE >= '1993-09-01' AND T1.L_SHIPDATE < '1993-10-01';
