@@ -354,7 +354,7 @@ def _format_expression(
         schema: Schema, 
         anonymize_literal: bool = False,
         remove_alias: bool = True,
-        lower_case: bool = False  # used for literal case
+        lower_case: bool = True  # used for literal case
     ) -> Tuple[str, exp.Expression]:
     if remove_alias and isinstance(expr, (exp.Alias, exp.Ordered)):
         return _format_expression(
@@ -367,12 +367,11 @@ def _format_expression(
 
     if isinstance(expr, (exp.Column, exp.Star)):
         name = _get_full_column_name(expr, aliases, schema)
-        
         # change expression for the table
         if expr.args.get('table') and expr.table.lower() in aliases['table']:
             # 1st condition: check if there is table
             # 2nd condition: check alias table
-            original_table = aliases['table'][expr.table.lower()]
+            original_table = aliases['table'][expr.table.lower()].lower()
             quoted = expr.args['table'].quoted
             expr.args['table'] = exp.Identifier(this=original_table, quoted=quoted)
         elif not expr.args.get('table') and name != '__all__':
@@ -387,6 +386,13 @@ def _format_expression(
                 else:
                     table = name.split('.')[0].lstrip('__')
                 expr.args['table'] = exp.Identifier(this=table, quoted=False)
+
+        if name != '__all__' and lower_case:
+            # change column name as lower case
+            expr.args['this'] = exp.Identifier(
+                this=expr.args['this'].name.lower(),
+                quoted=expr.args['this'].quoted
+            )
 
         return name, expr
         
@@ -577,13 +583,6 @@ def _format_expression(
                         sub_expr.args[sub_sub_args] = new_expr
                 expr.args[arg] = sub_expr
         return SUBQUERY, expr
-    
-
-    if isinstance(expr, exp.Select):
-        pass
-        # different with subquery need to loop all
-        
-
     
     if isinstance(expr, exp.Neg):
         # Unary operator
@@ -1022,6 +1021,7 @@ def extract_all(parsed_query: exp.Expression, schema: Schema) -> Tuple[Set[str],
     results['distinct'] = False
     results['limit'] = False
     nested = len(subqueries)
+    formatted_subqueries = []
 
     for query in subqueries:
         sel_cols, sel_asts  = extract_selection(query, aliases, schema)
@@ -1040,9 +1040,11 @@ def extract_all(parsed_query: exp.Expression, schema: Schema) -> Tuple[Set[str],
         results['orderby_asts'].update(orderby_asts)
         results['distinct'] |= others['distinct']
         results['limit'] |= others['limit']
-
+        *_, new_query = _format_expression(query, aliases, schema, remove_alias=False)
+        formatted_subqueries.append(new_query)
+    
     results['nested'] = nested
-    results['subqueries'] = subqueries
+    results['subqueries'] = formatted_subqueries
 
     return results
 
