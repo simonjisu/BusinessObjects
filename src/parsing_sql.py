@@ -540,14 +540,42 @@ def _format_expression(
         return (f"{window_name} OVER " + key).lower(), expr
 
     if isinstance(expr, exp.Identifier):
+        if lower_case:
+            expr = exp.Identifier(this=expr.name.lower(), quoted=expr.quoted)
+        return expr.name.lower(), expr
+
+    if isinstance(expr, exp.Table):
+        if lower_case:
+            if expr.args.get('alias'):
+                if remove_alias:
+                    expr.args.pop('alias')
+                else:
+                    expr.args['alias'] = exp.TableAlias(
+                            this=exp.Identifier(
+                                this=expr.args['alias'].name.lower(), 
+                                quoted=expr.args['alias'].this.quoted
+                            )
+                        )
+            expr.args['this'] = exp.Identifier(
+                this=expr.args['this'].name.lower(), 
+                quoted=expr.args['this'].quoted   
+            )
         return expr.name.lower(), expr
 
     if isinstance(expr, (exp.Subquery, exp.Select)):
         args = [(k, v) for k, v in expr.args.items() if v]
         for arg, sub_expr in args:
             if arg == 'from':
-                continue
-            if isinstance(sub_expr, list):
+                # FROM clause
+                name, new_expr = _format_expression(
+                    sub_expr.this,
+                    aliases,
+                    schema,
+                    anonymize_literal=anonymize_literal,
+                )
+                expr.args['from'] = exp.From(this=new_expr)
+                # print(sub_expr, repr(sub_expr), type(new_expr))
+            elif isinstance(sub_expr, list):
                 new_sub_expr = []
                 for sub in sub_expr:
                     name, new_expr = _format_expression(
