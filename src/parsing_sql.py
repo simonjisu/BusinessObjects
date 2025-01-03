@@ -154,6 +154,11 @@ def get_subqueries(node: exp.Expression) -> List[exp.Select]:
                 subquery = get_subqueries(sub)
                 results += subquery
 
+        # Find subqueries in EXISTS
+        for e in node.find_all(exp.Exists):
+            subquery = [e.args.get('this')]
+            results += subquery
+
         return results
 
     # If it's none of the above (e.g., just a Table or Column), no subqueries here
@@ -362,7 +367,8 @@ def _format_expression(
 
     if isinstance(expr, (exp.Column, exp.Star)):
         name = _get_full_column_name(expr, aliases, schema)
-        # change expression
+        
+        # change expression for the table
         if expr.args.get('table') and expr.table.lower() in aliases['table']:
             # 1st condition: check if there is table
             # 2nd condition: check alias table
@@ -375,7 +381,11 @@ def _format_expression(
                 subquery_col = name.lstrip('(').rstrip(')')
                 expr.args['this'] = exp.Subquery(this=sqlglot.parse_one(subquery_col))
             else:
-                table = name.split('.')[0].lstrip('__')
+                if len(name.split('.')) == 1:
+                    # only column name
+                    table = 'None'
+                else:
+                    table = name.split('.')[0].lstrip('__')
                 expr.args['table'] = exp.Identifier(this=table, quoted=False)
 
         return name, expr
@@ -420,13 +430,16 @@ def _format_expression(
 
     if isinstance(expr, exp.Distinct):
         # Only one case that appears with Function e.g., COUNT(DISTINCT col)
-        name, new_expr = _format_expression(
-            expr.expressions[0], 
-            aliases, 
-            schema, 
-            anonymize_literal=anonymize_literal
-        )
-        expr.expressions[0] = new_expr
+        if expr.args.get('expression'):
+            name, new_expr = _format_expression(
+                expr.expressions[0], 
+                aliases, 
+                schema, 
+                anonymize_literal=anonymize_literal
+            )
+            expr.expressions[0] = new_expr
+        else:
+            name = ''
 
         return 'DISTINCT '.lower() + name, expr
     
@@ -463,6 +476,17 @@ def _format_expression(
     # if isinstance(expr, exp.Alias) and not remove_alias:
     #     base_str, new_expr = _format_expression(expr.this, aliases, schema, remove_alias=remove_alias, anonymize_literal=anonymize_literal)
     #     return f"{base_str} as {expr.alias.lower()}", new_expr
+
+    if isinstance(expr, exp.Exists):
+        assert isinstance(expr.args.get('this'), exp.Select), f"Exists should have a subquery {expr.args.get('this')}"
+        name, new_expr = _format_expression(
+            expr.args.get('this'), 
+            aliases, 
+            schema, 
+            anonymize_literal=anonymize_literal
+        )
+        expr.args['this'] = new_expr
+        return f"EXISTS".lower() + f"({name})", expr
 
     if isinstance(expr, exp.Window):
         # this, partition_by(list), order(list), over
@@ -512,10 +536,54 @@ def _format_expression(
     if isinstance(expr, exp.Identifier):
         return expr.name.lower(), expr
 
-    if isinstance(expr, exp.Subquery):
-        # since we extract all the subqueires at the first time
-        # we can just return the subquery as a string
+    if isinstance(expr, (exp.Subquery, exp.Select)):
+        args = [(k, v) for k, v in expr.args.items() if v]
+        for arg, sub_expr in args:
+            if arg == 'from':
+                continue
+            if isinstance(sub_expr, list):
+                new_sub_expr = []
+                for sub in sub_expr:
+                    name, new_expr = _format_expression(
+                        sub, 
+                        aliases, 
+                        schema, 
+                        anonymize_literal=anonymize_literal
+                    )
+                    new_sub_expr.append(new_expr)
+                expr.args[arg] = new_sub_expr
+            else:
+                # check the follow up arguments for sub_expr
+                sub_args = [(k, v) for k, v in sub_expr.args.items() if v]
+                for sub_sub_args, sub_sub_expr in sub_args:
+                    if isinstance(sub_sub_expr, list):
+                        new_sub_sub_expr = []
+                        for sub_sub in sub_sub_expr:
+                            name, new_expr = _format_expression(
+                                sub_sub, 
+                                aliases, 
+                                schema, 
+                                anonymize_literal=anonymize_literal
+                            )
+                            new_sub_sub_expr.append(new_expr)
+                        sub_expr.args[sub_sub_args] = new_sub_sub_expr
+                    else:
+                        name, new_expr = _format_expression(
+                            sub_sub_expr, 
+                            aliases, 
+                            schema, 
+                            anonymize_literal=anonymize_literal
+                        )
+                        sub_expr.args[sub_sub_args] = new_expr
+                expr.args[arg] = sub_expr
         return SUBQUERY, expr
+    
+
+    if isinstance(expr, exp.Select):
+        pass
+        # different with subquery need to loop all
+        
+
     
     if isinstance(expr, exp.Neg):
         # Unary operator
@@ -537,7 +605,7 @@ def _format_expression(
                 return str(expr).lower(), expr
             else:
                 return str(expr), expr
-        
+
     if isinstance(expr, (exp.DataType, exp.Null, exp.Boolean)):
         if lower_case:
             return str(expr).lower(), expr
@@ -656,8 +724,8 @@ def _format_exp_not(
 
 def _get_full_column_name(col: exp.Column, aliases: Dict[str, Dict[str, str]], schema: Schema) -> str:
     column_name = col.name.lower()
-    if (not schema.check_column_exist(column_name)) and (column_name not in aliases['column']):
-        assert False, f"Column {column_name} not found in schema"
+    # if (not schema.check_column_exist(column_name)) and (column_name not in aliases['column']):
+    #     assert False, f"Column {column_name} not found in schema"
     
     # If the column is *, map directly to __all__
     if column_name == '*':
@@ -693,8 +761,8 @@ def _get_full_column_name(col: exp.Column, aliases: Dict[str, Dict[str, str]], s
                     real_table_name = f'subquery_{table_name}'
                     break
 
-        if not real_table_name:
-            assert False, f"Table not found for column {column_name}"
+        # if not real_table_name:
+        #     assert False, f"Table not found for column {column_name}"
         # if column_name in aliases['column']:
         #     original_table_name = aliases['column'][column_name].split('.')[0].lower()
         #     real_table_name = aliases['table'][original_table_name]
