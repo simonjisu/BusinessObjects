@@ -1,0 +1,2 @@
+count(distinct c_custkey)
+57

@@ -1,0 +1,55 @@
+[
+    {
+        "instance_id": "q12",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q13",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q14",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q15",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q16",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q17",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q18",
+        "score": 0,
+        "error_info": "Execution Error: Execution failed on sql 'SELECT COUNT(DISTINCT T1.C_CUSTKEY) AS large_volume_customers\nFROM CUSTOMER T1\nJOIN ORDERS T2 ON T1.C_CUSTKEY = T2.O_CUSTKEY\nWHERE T2.O_ORDERKEY IN (\n    SELECT T3.O_ORDERKEY\n    FROM LINEITEM T3\n    GROUP BY T3.O_ORDERKEY\n    HAVING SUM(T3.L_QUANTITY) > 300\n);': no such column: T3.O_ORDERKEY"
+    },
+    {
+        "instance_id": "q19",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q20",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q21",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "final_score": 0.5
+    }
+]

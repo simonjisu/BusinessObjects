@@ -1,0 +1,55 @@
+[
+    {
+        "instance_id": "q12",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q13",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q14",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q15",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q16",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q17",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q18",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q19",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q20",
+        "score": 0,
+        "error_info": "Execution Error: Execution failed on sql 'SELECT COUNT(DISTINCT T1.S_SUPPKEY) AS num_suppliers\nFROM SUPPLIER T1\nJOIN NATION T2 ON T1.S_NATIONKEY = T2.N_NATIONKEY\nJOIN REGION T3 ON T2.N_REGIONKEY = T3.R_REGIONKEY\nJOIN PARTSUPP T4 ON T1.S_SUPPKEY = T4.PS_SUPPKEY\nJOIN LINEITEM T5 ON T4.PS_PARTKEY = T5.L_PARTKEY AND T4.PS_SUPPKEY = T5.L_SUPPKEY\nWHERE T2.N_NAME = 'CANADA'\n  AND strftime('%Y', T5.L_SHIPDATE) = '1993'\n  AND T4.PS_AVAILQTY > SUM(T5.L_QUANTITY) * 0.5\nGROUP BY T1.S_SUPPKEY;': misuse of aggregate: SUM()"
+    },
+    {
+        "instance_id": "q21",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "final_score": 0.6
+    }
+]
