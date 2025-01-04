@@ -265,12 +265,11 @@ def get_all_partial_score(
         results[arg] = get_partial_score(source_output, target_output, arg, build_type, criteria, penalty, use_bert, rescale_with_baseline)
     
     scores = np.array([v for v in results.values() if v is not None])
-    # harmoic score 
     epsilon = 1e-9
     overall_score = np.mean(scores + epsilon)
     return results, round(overall_score, 6)
 
-# Complexity
+# ---------------- Complexity ---------------- 
 def normalize_values(x, min_value=0, max_value=6):
     normalized = (x - min_value) / (max_value - min_value)
     return normalized

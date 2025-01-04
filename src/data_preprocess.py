@@ -176,8 +176,11 @@ def split_train_dev_test(
         data_samples: dict, 
         train_ratio: float=0.8, 
         dev_ratio: float=0.1,
+        seed: int=42
     ) -> tuple:
+    import numpy as np
     assert 1.0 - train_ratio - dev_ratio > 0, 'Not enough samples for test set'
+    np.random.seed(seed)
     train_samples = []
     dev_samples = []
     test_samples = []
