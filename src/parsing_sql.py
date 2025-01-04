@@ -17,6 +17,7 @@ from itertools import chain
 #     exp.Like: "like",
 #     # Add more if needed
 # }
+from copy import deepcopy
 
 STRING_TYPE = '[PLACEHOLDER-TYPE:STRING]'.lower()
 NUMERIC_TYPE = '[PLACEHOLDER-TYPE:NUMERIC]'.lower()
@@ -250,13 +251,14 @@ def extract_from_join(
         aliases: Dict[str, Dict[str, str]], 
         schema: Schema,
         anonymize_literal: bool = True) -> Set[str]:
+    query = deepcopy(query)
     tables = set()
     from_clause = query.args.get('from')
     if from_clause and isinstance(from_clause, exp.From):
         name, expr = _format_expression(from_clause.this, aliases, schema, anonymize_literal)
-        tables.add((name, expr, 'from'))
+        tables.add((name, exp.Table(this=expr), 'from'))
 
-    join_clause = query.args.get('joins')
+    join_clause = query.args.get('joins', [])
     if join_clause:
         for join_expr in join_clause:
             left_expr = join_expr.args.get('this')
@@ -273,45 +275,8 @@ def extract_selection(
         schema: Schema,
         anonymize_literal: bool = True
     ) -> Tuple[Set[str], Set[Tuple[str, str]]]:
-    """
-    Extracts information about the columns and expressions used in the SELECT clause of a query.
 
-    Parameters:
-        query (exp.Select): The SQL SELECT query expression to analyze.
-        aliases (Dict[str, Dict[str, str]]): A dictionary containing alias mappings.
-            - 'table': Maps table aliases to their corresponding table names.
-            - 'column': Maps column aliases to their corresponding full expressions.
-        schema (Schema): An object that provides schema information, including table and column mappings.
-
-    Returns:
-        Tuple[Set[str], Set[Tuple[str, str]]]:
-            - A set of unique column names, fully qualified (e.g., '__table.column__').
-            - A set of tuples where each tuple contains:
-                - A string representation of the expression or column used in the SELECT clause.
-                - A tag indicating the type of the expression:
-                    - '<s>': Simple column reference (e.g., `table.column` or `column`).
-                    - '<f>': Function or calculation (e.g., `SUM(column)` or `column + 1`).
-
-    Notes:
-        - This function handles column aliases by replacing them with their original expressions.
-        - Expressions that involve functions or calculations are tagged as '<f>'.
-        - The result only includes columns and expressions explicitly referenced in the SELECT clause.
-        - Any '*' in the SELECT clause is replaced with '__all__' based on the schema configuration.
-
-    Example:
-        Given the query:
-            SELECT cli.first as f, cli.middle + 1 as m, COUNT(cli.name) as cnt 
-            FROM client cli
-        
-        And the schema mapping:
-            {'client': ['first', 'middle', 'name']}
-        
-        The function would return:
-            (
-                {'__client.first__', '__client.middle__', '__client.name__'},
-                {('__client.first__', '<s>'), ('__client.middle__ + 1', '<f>'), ('COUNT(__client.name__)', '<f>')}
-            )
-    """
+    query = deepcopy(query)
     unique_columns = set()
     selection_asts = set()
 
@@ -351,6 +316,7 @@ def _format_expression(
         remove_alias: bool = True,
         lower_case: bool = True  # used for literal case
     ) -> Tuple[str, exp.Expression]:
+    
     if remove_alias and isinstance(expr, (exp.Alias, exp.TableAlias, exp.Ordered)):
         return _format_expression(
             expr.this, 
@@ -587,9 +553,16 @@ def _format_expression(
 
     if isinstance(expr, (exp.Subquery, exp.Select)):
         args = [(k, v) for k, v in expr.args.items() if v]
+        args_list = []
+        # if isinstance(expr, exp.Subquery):
+        #     s2a = {v.lower(): k for k, v in aliases['table'].items()}
+        #     table_alias = s2a.get(str(expr.this).lower())
+        #     if table_alias:
+        #         return f"{table_alias}".lower(), expr
+        expr_str = str(expr)
         for arg, sub_expr in args:
-            if arg == 'from':
-                # FROM clause
+            if arg in ('from'):
+                # FROM / alias clause
                 name, new_expr = _format_expression(
                     sub_expr.this,
                     aliases,
@@ -597,7 +570,7 @@ def _format_expression(
                     anonymize_literal,
                 )
                 expr.args['from'] = exp.From(this=new_expr)
-                # print(sub_expr, repr(sub_expr), type(new_expr))
+                args_list.append(f'FROM {name}')
             elif isinstance(sub_expr, list):
                 new_sub_expr = []
                 for sub in sub_expr:
@@ -608,6 +581,7 @@ def _format_expression(
                         anonymize_literal
                     )
                     new_sub_expr.append(new_expr)
+                    args_list.append(f'{name}')
                 expr.args[arg] = new_sub_expr
             else:
                 # check the follow up arguments for sub_expr
@@ -623,6 +597,7 @@ def _format_expression(
                                 anonymize_literal
                             )
                             new_sub_sub_expr.append(new_expr)
+                            args_list.append(f'{name}')
                         sub_expr.args[sub_sub_args] = new_sub_sub_expr
                     else:
                         name, new_expr = _format_expression(
@@ -631,15 +606,12 @@ def _format_expression(
                             schema, 
                             anonymize_literal
                         )
+                        args_list.append(f'{name}')
                         sub_expr.args[sub_sub_args] = new_expr
                 expr.args[arg] = sub_expr
 
-        # if isinstance(expr, exp.Subquery):
-        #     s2a = {v.lower(): k for k, v in aliases['table'].items()}
-        #     table_alias = s2a.get(str(expr.this).lower())
-        #     if table_alias:
-        #         return f"{table_alias}".lower(), expr
-        return str(expr), expr # SUBQUERY, expr
+        
+        return expr_str, expr # SUBQUERY, expr
     
     if isinstance(expr, exp.Neg):
         # Unary operator
@@ -855,6 +827,7 @@ def extract_condition(
         aliases: Dict[str, Dict[str, str]], 
         schema: Schema, 
         anonymize_literal:bool = True) -> Tuple[Set[str], Set[str]]:
+    query = deepcopy(query)
     condition_asts = set()
     operator_types = set()
 
@@ -893,7 +866,6 @@ def _extract_conditions(
     - Binary operators (=, >, <, etc.): return 'left op right', record the operator
     - Leaf nodes: directly return their string representation
     """
-
     if isinstance(expr, exp.Paren):
         return _extract_conditions(
             expr.args.get('this'), 
@@ -928,6 +900,7 @@ def extract_aggregation(
         aliases: Dict[str, Dict[str, str]], 
         schema: Schema,
         anonymize_literal: bool=True) -> Tuple[Set[str], Set[Tuple[str, str]]]:
+    query = deepcopy(query)
     unique_columns = set()
     aggregation_asts = set()
 
@@ -948,6 +921,7 @@ def extract_orderby(
         aliases: Dict[str, Dict[str, str]],
         schema: Schema,
         anonymize_literal: bool = True) -> Set[str]:
+    query = deepcopy(query)
     unique_columns = set()
     otherby_asts = set()
 
@@ -1002,6 +976,7 @@ def extract_all(sql: str, schema: Schema) -> Tuple[Set[str], Set[Tuple[str, str]
     formatted_subqueries = []
 
     for query in subqueries:
+        query = deepcopy(query)
         tables = extract_from_join(query, aliases, schema)
         sel_cols, sel_asts  = extract_selection(query, aliases, schema)
         cond_asts, op_types = extract_condition(query, aliases, schema)

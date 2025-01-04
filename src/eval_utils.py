@@ -125,7 +125,7 @@ def partial_matching_with_penalty(matrix: np.ndarray, penalty: float=0.0, maximi
     score_matrix[:n, :m] = matrix
     row_ind, col_ind = linear_sum_assignment(score_matrix, maximize=maximize)
     total_score = (score_matrix[row_ind, col_ind] + epsilon).mean()
-    return row_ind, col_ind, total_score
+    return row_ind, col_ind, round(total_score, 6)
 
 def get_structural_score(
         source: list[exp.Expression], 
@@ -178,8 +178,8 @@ def get_semantic_score(
         matrix = F1.numpy().reshape(n, m)
     else:
         matrix = np.zeros((n, m), dtype=np.float32)
-        for i, s in source_str:
-            for j, t in target_str:
+        for i, s in enumerate(source_str):
+            for j, t in enumerate(target_str):
                 matrix[i, j] = s.similarity(t)
 
     *_, final_score = partial_matching_with_penalty(matrix, penalty, maximize=True)
@@ -198,7 +198,7 @@ def get_final_score(
     structural_score = get_structural_score(source, target, build_type, criteria, penalty)
     semantic_score = get_semantic_score(source, target, use_bert, penalty, rescale_with_baseline)
     f1 = (2 * structural_score * semantic_score + epsilon) / (structural_score + semantic_score + epsilon)
-    return f1
+    return structural_score, semantic_score, round(f1, 6)
 
 def get_partial_score(
         output1, 
@@ -235,20 +235,23 @@ def get_partial_score(
         if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
             source = [ast for _, ast, _ in output1[arg]]
             target = [ast for _, ast, _ in output2[arg]]
-            score = get_final_score(source, target, build_type, criteria, penalty, use_bert, rescale_with_baseline)
+            structural_score, semantic_score, score = get_final_score(source, target, build_type, criteria, penalty, use_bert, rescale_with_baseline)
         elif arg == 'subqueries':
             source = output1[arg][1:]
             target = output2[arg][1:]
-            score = get_final_score(source, target, build_type, criteria, penalty, use_bert, rescale_with_baseline)
+            structural_score, semantic_score, score = get_final_score(source, target, build_type, criteria, penalty, use_bert, rescale_with_baseline)
         elif arg in ['distinct', 'limit']:
             score = 1.0 if criteria == 'tsed' else 0.0
+            structural_score, semantic_score = score, score
     elif target_exists ^ source_exists:
-        score = 0.0 if criteria == 'tsed' else np.infty    
+        score = 0.0 if criteria == 'tsed' else np.infty
+        structural_score, semantic_score = score, score 
     else:
         # they don't exist in both so, we can't measure the score
         score = None
+        structural_score, semantic_score = score, score
         # score = 0.0 if criteria == 'tsed' else np.infty
-    return score
+    return structural_score, semantic_score, score
 
 def get_all_partial_score(
         source_output,
@@ -258,16 +261,22 @@ def get_all_partial_score(
         penalty: float = 0.01,
         use_bert: bool = True,
         rescale_with_baseline: bool = True
-    ):
+    ) -> Tuple[dict, dict]:
     args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
     results = {}
     for arg in args:
-        results[arg] = get_partial_score(source_output, target_output, arg, build_type, criteria, penalty, use_bert, rescale_with_baseline)
+        structural_score, semantic_score, score = get_partial_score(source_output, target_output, arg, build_type, criteria, penalty, use_bert, rescale_with_baseline)
+        results[arg] = structural_score, semantic_score, score
     
-    scores = np.array([v for v in results.values() if v is not None])
+    scores = np.array([v for v in results.values() if v[-1] is not None])
     epsilon = 1e-9
-    overall_score = np.mean(scores + epsilon)
-    return results, round(overall_score, 6)
+    overall_score = np.round(np.mean(scores + epsilon, axis=0), decimals=4)
+    final_score = {
+        'structural': overall_score[0],
+        'semantic': overall_score[1],
+        'overall': overall_score[2]
+    }
+    return results, final_score  # structural, semantic, overall
 
 # ---------------- Complexity ---------------- 
 def normalize_values(x, min_value=0, max_value=6):
