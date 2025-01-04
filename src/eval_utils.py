@@ -229,7 +229,7 @@ def get_partial_score(
     
     source_exists = bool(output1[arg]) if arg != 'subqueries' else bool(output1[arg][1:])
     target_exists = bool(output2[arg]) if arg != 'subqueries' else bool(output2[arg][1:])
-
+    print(arg, source_exists, target_exists, target_exists and source_exists)
     if target_exists and source_exists:
         if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
             source = [ast for _, ast, _ in output1[arg]]
@@ -242,8 +242,9 @@ def get_partial_score(
         elif arg in ['distinct', 'limit']:
             score = 1.0 if criteria == 'tsed' else 0.0
     elif target_exists ^ source_exists:
-        score = 1.0 if criteria == 'tsed' else 0.0    
+        score = 0.0 if criteria == 'tsed' else np.infty    
     else:
+
         # they don't exist in both so, we can't measure the score
         score = None
         # score = 0.0 if criteria == 'tsed' else np.infty
