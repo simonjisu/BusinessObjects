@@ -225,13 +225,13 @@ def get_partial_score(
     """
     assert build_type in ['apted', 'zss'], f'build_type should be either apted or zss, but got {build_type}'
     assert criteria in ['tsed', 'distance'], f'criteria should be either tsed or distance, but got {criteria}'
-    assert arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit'], f'arg should be either sel_asts, cond_asts, agg_asts, orderby_asts, subqueries, distinct, limit, but got {arg}'
+    assert arg in ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit'], f'arg should be either sel_asts, cond_asts, agg_asts, orderby_asts, subqueries, distinct, limit, but got {arg}'
     
     source_exists = bool(output1[arg]) if arg != 'subqueries' else bool(output1[arg][1:])
     target_exists = bool(output2[arg]) if arg != 'subqueries' else bool(output2[arg][1:])
 
     if target_exists and source_exists:
-        if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts']:
+        if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
             source = [ast for _, ast, _ in output1[arg]]
             target = [ast for _, ast, _ in output2[arg]]
             score = get_final_score(source, target, build_type, criteria, penalty, use_bert, rescale_with_baseline)
@@ -239,9 +239,6 @@ def get_partial_score(
             source = output1[arg][1:]
             target = output2[arg][1:]
             score = get_final_score(source, target, build_type, criteria, penalty, use_bert, rescale_with_baseline)
-            # output1 = {'subqueries': output1[arg][1:]}
-            # output2 = {'subqueries': output2[arg][1:]}
-            # return get_partial_score(output1, output2, arg='subqueries', criteria=criteria, penalty=penalty)
         elif arg in ['distinct', 'limit']:
             score = 1.0 if criteria == 'tsed' else 0.0
     elif target_exists ^ source_exists:
@@ -261,7 +258,7 @@ def get_all_partial_score(
         use_bert: bool = True,
         rescale_with_baseline: bool = True
     ):
-    args = ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
+    args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
     results = {}
     for arg in args:
         results[arg] = get_partial_score(source_output, target_output, arg, build_type, criteria, penalty, use_bert, rescale_with_baseline)
@@ -270,7 +267,6 @@ def get_all_partial_score(
     # harmoic score 
     overall_score = 2 * np.prod(scores) / np.sum(scores)
     return results, overall_score
-
 
 if __name__ == '__main__':
     # example

@@ -110,6 +110,7 @@ def get_subqueries(node: exp.Expression) -> List[exp.Select]:
     if isinstance(node, exp.CTE):
         # Common Table Expression: extract subqueries from its inner SELECT
         inner = node.args.get("this")
+        print(repr(inner))
         return inner if inner else []
 
     if isinstance(node, exp.Select):
@@ -125,12 +126,13 @@ def get_subqueries(node: exp.Expression) -> List[exp.Select]:
                 subquery = get_subqueries(main_source)
                 results += subquery
 
-            # Joins in FROM
-            for join_expr in from_clause.args.get("joins", []):
-                right_source = join_expr.args.get("expression")
-                if right_source:
-                    subquery = get_subqueries(right_source)
-                    results += subquery
+        join_clause = node.args.get("joins", [])
+        # Joins in FROM
+        for join_expr in join_clause:
+            right_source = join_expr.args.get("this")
+            if right_source:
+                subquery = get_subqueries(right_source)
+                results += subquery
 
         # Check WHERE and HAVING for nested subqueries
         for clause_name in ("where", "having"):
@@ -246,8 +248,24 @@ def _handle_table_or_subquery(expr: exp.Expression, table_alias_map: Dict[str, s
 def extract_from_join(
         query: exp.Select, 
         aliases: Dict[str, Dict[str, str]], 
-        schema: Schema) -> Set[str]:
-    pass
+        schema: Schema,
+        anonymize_literal: bool = True) -> Set[str]:
+    tables = set()
+    from_clause = query.args.get('from')
+    if from_clause and isinstance(from_clause, exp.From):
+        name, expr = _format_expression(from_clause.this, aliases, schema, anonymize_literal)
+        tables.add((name, expr, 'from'))
+
+    join_clause = query.args.get('joins')
+    if join_clause:
+        for join_expr in join_clause:
+            left_expr = join_expr.args.get('this')
+            left_name, new_left_expr = _format_expression(left_expr, aliases, schema, anonymize_literal=False)
+            join_expr.args['this'] = new_left_expr
+            table = exp.Table(this=left_expr)
+            tables.add((left_name, table, 'join'))
+
+    return tables
 
 def extract_selection(
         query: exp.Select, 
@@ -333,7 +351,7 @@ def _format_expression(
         remove_alias: bool = True,
         lower_case: bool = True  # used for literal case
     ) -> Tuple[str, exp.Expression]:
-    if remove_alias and isinstance(expr, (exp.Alias, exp.Ordered)):
+    if remove_alias and isinstance(expr, (exp.Alias, exp.TableAlias, exp.Ordered)):
         return _format_expression(
             expr.this, 
             aliases, 
@@ -565,7 +583,7 @@ def _format_expression(
                 this=expr.args['this'].name.lower(), 
                 quoted=expr.args['this'].quoted   
             )
-        return expr.name.lower(), expr
+        return str(expr), expr # expr.name.lower(), expr
 
     if isinstance(expr, (exp.Subquery, exp.Select)):
         args = [(k, v) for k, v in expr.args.items() if v]
@@ -615,7 +633,13 @@ def _format_expression(
                         )
                         sub_expr.args[sub_sub_args] = new_expr
                 expr.args[arg] = sub_expr
-        return SUBQUERY, expr
+
+        # if isinstance(expr, exp.Subquery):
+        #     s2a = {v.lower(): k for k, v in aliases['table'].items()}
+        #     table_alias = s2a.get(str(expr.this).lower())
+        #     if table_alias:
+        #         return f"{table_alias}".lower(), expr
+        return str(expr), expr # SUBQUERY, expr
     
     if isinstance(expr, exp.Neg):
         # Unary operator
@@ -971,20 +995,21 @@ def extract_all(sql: str, schema: Schema) -> Tuple[Set[str], Set[Tuple[str, str]
     subqueries = get_subqueries(parsed_query)
 
     results = defaultdict(set)
+    results['aliases'] = aliases  # number of table used in the query(from + joins)
     results['distinct'] = False
     results['limit'] = False
     nested = len(subqueries)
     formatted_subqueries = []
 
     for query in subqueries:
-        # aliases = extract_aliases(query)
+        tables = extract_from_join(query, aliases, schema)
         sel_cols, sel_asts  = extract_selection(query, aliases, schema)
         cond_asts, op_types = extract_condition(query, aliases, schema)
         agg_cols, agg_asts  = extract_aggregation(query, aliases, schema)
         orderby_cols, orderby_asts = extract_orderby(query, aliases, schema)
         others = extract_others(query)
-        # TODO: add from & join
         
+        results['table_asts'].update(tables)
         results['sel'].update(sel_cols)
         results['sel_asts'].update(sel_asts)
         results['cond_asts'].update(cond_asts)
