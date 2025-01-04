@@ -193,10 +193,11 @@ def get_final_score(
         penalty: float=0.01,
         use_bert: bool=True,
         rescale_with_baseline: bool=True,
+        epsilon: float=1e-9
     ) -> float:
     structural_score = get_structural_score(source, target, build_type, criteria, penalty)
     semantic_score = get_semantic_score(source, target, use_bert, penalty, rescale_with_baseline)
-    f1 = 2 * structural_score * semantic_score / (structural_score + semantic_score)
+    f1 = (2 * structural_score * semantic_score + epsilon) / (structural_score + semantic_score + epsilon)
     return f1
 
 def get_partial_score(
@@ -229,7 +230,7 @@ def get_partial_score(
     
     source_exists = bool(output1[arg]) if arg != 'subqueries' else bool(output1[arg][1:])
     target_exists = bool(output2[arg]) if arg != 'subqueries' else bool(output2[arg][1:])
-    print(arg, source_exists, target_exists, target_exists and source_exists)
+
     if target_exists and source_exists:
         if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
             source = [ast for _, ast, _ in output1[arg]]
@@ -244,7 +245,6 @@ def get_partial_score(
     elif target_exists ^ source_exists:
         score = 0.0 if criteria == 'tsed' else np.infty    
     else:
-
         # they don't exist in both so, we can't measure the score
         score = None
         # score = 0.0 if criteria == 'tsed' else np.infty
@@ -264,10 +264,11 @@ def get_all_partial_score(
     for arg in args:
         results[arg] = get_partial_score(source_output, target_output, arg, build_type, criteria, penalty, use_bert, rescale_with_baseline)
     
-    scores = [v for v in results.values() if v is not None]
+    scores = np.array([v for v in results.values() if v is not None])
     # harmoic score 
-    overall_score = 2 * np.prod(scores) / np.sum(scores)
-    return results, overall_score
+    epsilon = 1e-9
+    overall_score = np.mean(scores + epsilon)
+    return results, round(overall_score, 6)
 
 if __name__ == '__main__':
     # example
