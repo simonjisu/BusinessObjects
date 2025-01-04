@@ -1,0 +1,55 @@
+[
+    {
+        "instance_id": "q12",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q13",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q14",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q15",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q16",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q17",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q18",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q19",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "instance_id": "q20",
+        "score": 1,
+        "error_info": null
+    },
+    {
+        "instance_id": "q21",
+        "score": 0,
+        "error_info": "Incorrect Query Result"
+    },
+    {
+        "final_score": 0.3
+    }
+]
