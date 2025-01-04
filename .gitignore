@@ -165,3 +165,4 @@ data/sparc
 data/tpch/tpch.db
 data/tpch/tables
 data/spider
+*.pkl
