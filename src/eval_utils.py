@@ -270,6 +270,41 @@ def get_all_partial_score(
     overall_score = np.mean(scores + epsilon)
     return results, round(overall_score, 6)
 
+# Complexity
+def normalize_values(x, min_value=0, max_value=6):
+    normalized = (x - min_value) / (max_value - min_value)
+    return normalized
+
+def tanh(x: np.ndarray, k: float):
+    normalized = normalize_values(x, max_value=k)
+    return np.tanh(np.log(1+normalized.sum()))
+
+def derive_complexity(x: list[int], k=6):
+    complexity = tanh(np.array(x), k)
+    return complexity
+
+def get_complexity(output, k=6):
+    args1 = [('sel', 'sel_asts'), ('cond_asts', 'op_types'), ('agg', 'agg_asts'), ('orderby', 'orderby_asts')]
+    args2 = ['distinct', 'limit', 'nested', 'table_asts']
+    total_complexity = []
+    for arg in args1:
+        exists = all([output[arg[0]], output[arg[1]]])
+        if exists:
+            x = [len(output[arg[0]]), len(output[arg[1]])]
+            complexity = derive_complexity(x, k=k)
+            total_complexity.append(complexity)
+    
+    for arg in args2:
+        if output[arg]:
+            if arg == 'nested':
+                complexity = derive_complexity([output[arg]], k=k)
+            elif arg == 'table_asts':
+                complexity = derive_complexity([len(output[arg])], k=k)
+            else:
+                complexity = derive_complexity([int(output[arg])], k=k)
+            total_complexity.append(complexity)
+    return np.mean(total_complexity)
+
 if __name__ == '__main__':
     # example
     from .parsing_sql import Schema, extract_all
