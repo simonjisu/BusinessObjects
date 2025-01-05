@@ -108,6 +108,8 @@ def get_schema_str(
             format_column(col_name, col_type, col_fmt, None, skip_type) for col_name, col_type in cols.items()
         ])
 
+    col_explanation = _lower_keys(col_explanation) if col_explanation is not None else None
+
     schema_str = ''
     schema_str += '[Table and Columns]\n' if not remove_meta else ''
     for table_name, cols in schema.items():
@@ -175,3 +177,9 @@ def get_schema_str_with_tables(
         schema_str += '\n\n[Primary Keys]\n'
         schema_str += '\n'.join(primary_keys)
     return schema_str
+
+def _lower_keys(d: dict[str, dict[str, str]]) -> dict:
+    new_d = {}
+    for k, v in d.items():
+        new_d[k.lower()] = {k.lower(): v for k, v in v.items()}
+    return new_d

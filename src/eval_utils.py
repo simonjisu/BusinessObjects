@@ -20,6 +20,8 @@ except OSError:
     download('en_core_web_md')
 
 from bert_score import score as bscore
+# from .parsing_sql import _format_select
+
 
 def partial_match(gold_set: set, predict_set: set):
     intersection = gold_set.intersection(predict_set)
@@ -40,7 +42,7 @@ def partial_match(gold_set: set, predict_set: set):
     return iou, precision, recall, f1_score
 
 # ------------------------------ Tree Edit Distance and Tree Similarity Edit Distance ------------------------------
-def build_tree(ast_node: exp.Query, build_type: str) -> Tuple[Node|Tree, int]:
+def build_tree(ast_node: exp.Expression, build_type: str) -> Tuple[Node|Tree, int]:
     """Build a tree from an AST node.
     
     Args:
@@ -52,7 +54,7 @@ def build_tree(ast_node: exp.Query, build_type: str) -> Tuple[Node|Tree, int]:
         tree_node = Tree.from_text(tree_node + '}')
     return tree_node, node_count
 
-def _build_tree(ast_node: exp.Query, build_type: str) -> Tuple[Node|Tree, int]:
+def _build_tree(ast_node: exp.Expression, build_type: str) -> Tuple[Node|Tree, int]:
     tree_node = _build_node(ast_node, build_type)
     node_count = 1
     # Recursively add children and count nodes
@@ -200,9 +202,86 @@ def get_final_score(
     f1 = (2 * structural_score * semantic_score + epsilon) / (structural_score + semantic_score + epsilon)
     return structural_score, semantic_score, round(f1, 6)
 
+def get_all_structural_score(
+        source_output, 
+        target_output, 
+        build_type: str='apted',
+        criteria: str='tsed',
+        penalty: float = 0.01,
+    ):
+    args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
+    assert build_type in ['apted', 'zss'], f'build_type should be either apted or zss, but got {build_type}'
+    assert criteria in ['tsed', 'distance'], f'criteria should be either tsed or distance, but got {criteria}'
+        
+    results = {}
+    for arg in args:
+        source_exists = bool(source_output[arg]) if arg != 'subqueries' else bool(source_output[arg][1:])
+        target_exists = bool(target_output[arg]) if arg != 'subqueries' else bool(target_output[arg][1:])
+        if target_exists and source_exists:
+            if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
+                source = [ast for _, ast, _ in source_output[arg]]
+                target = [ast for _, ast, _ in target_output[arg]]
+                structural_score = get_structural_score(source, target, build_type, criteria, penalty)
+            elif arg == 'subqueries':
+                source = source_output[arg][1:]
+                target = target_output[arg][1:]
+                structural_score = get_structural_score(source, target, build_type, criteria, penalty)
+            elif arg in ['distinct', 'limit']:
+                structural_score = 1.0 if criteria == 'tsed' else 0.0
+        elif target_exists ^ source_exists:
+            structural_score = 0.0 if criteria == 'tsed' else np.infty
+        else:
+            # they don't exist in both so, we can't measure the score
+            structural_score = None
+            # score = 0.0 if criteria == 'tsed' else np.infty
+        results[arg] = structural_score
+    
+    scores = np.array([v for v in results.values() if v is not None])
+    epsilon = 1e-9
+    overall_score = np.round(np.mean(scores + epsilon), decimals=4)
+    return results, overall_score
+
+def get_all_semantic_score(
+        source_output, 
+        target_output, 
+        use_bert: bool=True,
+        penalty: float=0.01,
+        rescale_with_baseline: bool=True,
+        criteria: str='tsed',
+    ):
+    args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
+
+    results = {}
+    for arg in args:
+        source_exists = bool(source_output[arg]) if arg != 'subqueries' else bool(source_output[arg][1:])
+        target_exists = bool(target_output[arg]) if arg != 'subqueries' else bool(target_output[arg][1:])
+        if target_exists and source_exists:
+            if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
+                source = [ast for _, ast, _ in source_output[arg]]
+                target = [ast for _, ast, _ in target_output[arg]]
+                semantic_score = get_semantic_score(source, target, use_bert, penalty, rescale_with_baseline)
+            elif arg == 'subqueries':
+                source = source_output[arg][1:]
+                target = target_output[arg][1:]
+                semantic_score = get_semantic_score(source, target, use_bert, penalty, rescale_with_baseline)
+            elif arg in ['distinct', 'limit']:
+                semantic_score = 1.0 if criteria == 'tsed' else 0.0
+        elif target_exists ^ source_exists:
+            semantic_score = 0.0 if criteria == 'tsed' else np.infty
+        else:
+            # they don't exist in both so, we can't measure the score
+            semantic_score = None
+            # score = 0.0 if criteria == 'tsed' else np.infty
+        results[arg] = semantic_score
+    
+    scores = np.array([v for v in results.values() if v is not None])
+    epsilon = 1e-9
+    overall_score = np.round(np.mean(scores + epsilon), decimals=4)
+    return results, overall_score
+
 def get_partial_score(
-        output1, 
-        output2, 
+        source_output, 
+        target_output, 
         arg,
         build_type: str='apted',
         criteria: str='tsed',
@@ -228,17 +307,17 @@ def get_partial_score(
     assert criteria in ['tsed', 'distance'], f'criteria should be either tsed or distance, but got {criteria}'
     assert arg in ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit'], f'arg should be either sel_asts, cond_asts, agg_asts, orderby_asts, subqueries, distinct, limit, but got {arg}'
     
-    source_exists = bool(output1[arg]) if arg != 'subqueries' else bool(output1[arg][1:])
-    target_exists = bool(output2[arg]) if arg != 'subqueries' else bool(output2[arg][1:])
+    source_exists = bool(source_output[arg]) if arg != 'subqueries' else bool(source_output[arg][1:])
+    target_exists = bool(target_output[arg]) if arg != 'subqueries' else bool(target_output[arg][1:])
 
     if target_exists and source_exists:
         if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
-            source = [ast for _, ast, _ in output1[arg]]
-            target = [ast for _, ast, _ in output2[arg]]
+            source = [ast for _, ast, _ in source_output[arg]]
+            target = [ast for _, ast, _ in target_output[arg]]
             structural_score, semantic_score, score = get_final_score(source, target, build_type, criteria, penalty, use_bert, rescale_with_baseline)
         elif arg == 'subqueries':
-            source = output1[arg][1:]
-            target = output2[arg][1:]
+            source = source_output[arg][1:]
+            target = target_output[arg][1:]
             structural_score, semantic_score, score = get_final_score(source, target, build_type, criteria, penalty, use_bert, rescale_with_baseline)
         elif arg in ['distinct', 'limit']:
             score = 1.0 if criteria == 'tsed' else 0.0
@@ -338,11 +417,11 @@ if __name__ == '__main__':
         'lineitem': {'l_receiptdate': 'date', 'l_commitdate': 'date'}
     })
 
-    output1 = extract_all(sql1, schema)
-    output2 = extract_all(sql2, schema)
+    source_output = extract_all(sql1, schema)
+    target_output = extract_all(sql2, schema)
     
-    formatted_sql1 = output1['subqueries'][0]
-    formatted_sql2 = output2['subqueries'][0]
+    formatted_sql1 = source_output['subqueries'][0]
+    formatted_sql2 = target_output['subqueries'][0]
     tsed, distance = compute_tsed(formatted_sql1, formatted_sql2, build_type='apted')  # apted or zss
     print('[SQL1]\n', formatted_sql1.sql(pretty=True))
     print()
@@ -354,7 +433,7 @@ if __name__ == '__main__':
     # partial match
     print('Partial Match Score')
     
-    results, overall_score = get_all_partial_score(output1, output2, build_type='apted', criteria='tsed', penalty=0.01, use_bert=True, rescale_with_baseline=True)
+    results, overall_score = get_all_partial_score(source_output, target_output, build_type='apted', criteria='tsed', penalty=0.01, use_bert=True, rescale_with_baseline=True)
     for k, v in results.items():
         if v:
             print(f'- {k}: {v:.4f}')

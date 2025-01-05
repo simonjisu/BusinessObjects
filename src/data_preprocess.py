@@ -190,6 +190,8 @@ def split_train_dev_test(
         n_test = len(samples) - n_train - n_dev
         assert n_test > 0, f'Not enough samples for test set: {db_id}'
         assert len(samples) == (len(samples[:n_train]) + len(samples[n_train:(n_dev+n_train)]) + len(samples[n_train+n_dev:])), f'Error: {db_id}'
+        
+        np.random.shuffle(samples)
         train_samples.extend(samples[:n_train])
         dev_samples.extend(samples[n_train:(n_dev+n_train)])
         test_samples.extend(samples[n_train+n_dev:])

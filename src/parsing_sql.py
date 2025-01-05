@@ -523,7 +523,7 @@ def _format_expression(
                 )
                 orders_str.append(name)
                 orders_expr.append(new_expr)
-            expr.args['order'] = orders_expr
+            expr.args['order'] = exp.Order(expressions=orders_expr)
             key = f"(ORDER BY {', '.join(orders_str)})"
 
         return (f"{window_name} OVER " + key).lower(), expr
@@ -553,13 +553,16 @@ def _format_expression(
 
     if isinstance(expr, (exp.Subquery, exp.Select)):
         args = [(k, v) for k, v in expr.args.items() if v]
-        args_list = []
+        
         # if isinstance(expr, exp.Subquery):
         #     s2a = {v.lower(): k for k, v in aliases['table'].items()}
         #     table_alias = s2a.get(str(expr.this).lower())
         #     if table_alias:
         #         return f"{table_alias}".lower(), expr
+        # try: 
         expr_str = str(expr)
+        # except:
+        #     expr_str = _format_select(expr)
         for arg, sub_expr in args:
             if arg in ('from'):
                 # FROM / alias clause
@@ -570,7 +573,6 @@ def _format_expression(
                     anonymize_literal,
                 )
                 expr.args['from'] = exp.From(this=new_expr)
-                args_list.append(f'FROM {name}')
             elif isinstance(sub_expr, list):
                 new_sub_expr = []
                 for sub in sub_expr:
@@ -581,7 +583,6 @@ def _format_expression(
                         anonymize_literal
                     )
                     new_sub_expr.append(new_expr)
-                    args_list.append(f'{name}')
                 expr.args[arg] = new_sub_expr
             else:
                 # check the follow up arguments for sub_expr
@@ -597,7 +598,6 @@ def _format_expression(
                                 anonymize_literal
                             )
                             new_sub_sub_expr.append(new_expr)
-                            args_list.append(f'{name}')
                         sub_expr.args[sub_sub_args] = new_sub_sub_expr
                     else:
                         name, new_expr = _format_expression(
@@ -606,11 +606,9 @@ def _format_expression(
                             schema, 
                             anonymize_literal
                         )
-                        args_list.append(f'{name}')
                         sub_expr.args[sub_sub_args] = new_expr
                 expr.args[arg] = sub_expr
 
-        
         return expr_str, expr # SUBQUERY, expr
     
     if isinstance(expr, exp.Neg):
@@ -641,6 +639,27 @@ def _format_expression(
             return str(expr), expr
     
     return None, expr
+
+def _format_select(expr: exp.Select):
+    args = [
+        'kind', 'hint', 'distinct', 'expressions', 'limit', 'from', 'joins', 
+        'where', 'group', 'having', 'order']
+    s = 'SELECT '
+    s += ', '.join([str(x) for x in expr.args.get('expressions')])
+    s += str(expr.args.get('from'))
+    if expr.args.get('joins'):
+        s += ' '.join([str(x) for x in expr.args.get('joins')])
+    if expr.args.get('where'):
+        s += str(expr.args.get('where'))
+    if expr.args.get('group'):
+        s += str(expr.args.get('group'))
+    if expr.args.get('having'):
+        s += str(expr.args.get('having'))
+    if expr.args.get('order'):
+        s += str(expr.args.get('order'))
+    if expr.args.get('limit'):
+        s += str(expr.args.get('limit'))
+    return s
 
 def _format_exp_in(
         expr: exp.In, 

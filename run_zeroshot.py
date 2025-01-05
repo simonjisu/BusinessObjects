@@ -10,8 +10,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from src.data_preprocess import DatabaseModel, SpiderSample, BirdSample
-from src.pymodels import SQLResponse
+from src.pymodels import SQLResponse, SpiderSample, BirdSample, DatabaseModel
 from src.prompts import Prompts
 from src.eval import result_eq, check_if_exists_orderby
 from src.db_utils import get_schema_str
@@ -19,28 +18,30 @@ from src.database import SqliteDatabase
 from src.data_preprocess import (
     process_all_tables, 
     load_samples_spider_bird,
+    load_raw_data
 )
-from src.eval_complexity import (
-    load_plus_data, 
-    get_output_result_plus, 
-    eval_all_dataset
-)
+# from src.eval_complexity import (
+#     load_plus_data, 
+#     get_output_result_plus, 
+#     eval_all_dataset
+# )
 
 _ = load_dotenv(find_dotenv())
 
 def predict_sql(
-        samples: list[SpiderSample], 
-        spider_tables: dict[str, DatabaseModel], 
+        samples: list[SpiderSample|BirdSample], 
+        tables: dict[str, DatabaseModel], 
         chain: RunnableSequence, 
+        experiment_folder: Path,
         k: int = 500, 
-        file_name: str = 'full_sql_output'
+        file_name: str = 'full_sql_output',
     ) -> list[dict]:
     all_full_sql = list()
     for i, data in tqdm(enumerate(samples), total=len(samples)):
         db_schema = get_schema_str(
-            schema=spider_tables[data.db_id].db_schema, 
-            foreign_keys=spider_tables[data.db_id].foreign_keys,
-            col_explanation=spider_tables[data.db_id].col_explanation
+            schema=tables[data.db_id].db_schema, 
+            foreign_keys=tables[data.db_id].foreign_keys,
+            col_explanation=tables[data.db_id].col_explanation
         )
         input_data = {'schema': db_schema, 'input_query': data.final.question}
         output = chain.invoke(input=input_data)
@@ -56,24 +57,23 @@ def predict_sql(
         all_full_sql.append(full_sql_output)
 
         if len(all_full_sql) == k:
-            with open(proj_path / 'experiments' / f'{file_name}_{i//k}.jsonl', 'w') as f:
+            with open(experiment_folder / f'{file_name}_{i//k}.jsonl', 'w') as f:
                 for d in all_full_sql:
                     f.write(json.dumps(d) + '\n')
             all_full_sql = list()
 
     if len(all_full_sql) > 0:
-        with open(proj_path / 'experiments' / f'{file_name}_{i//k}.jsonl', 'w') as f:
+        with open(experiment_folder / f'{file_name}_{i//k}.jsonl', 'w') as f:
             for d in all_full_sql:
                 f.write(json.dumps(d) + '\n')
 
-def load_predictions(task: str, file_pattern: str) -> list[dict]:
+def load_predictions(file_pattern: str, prediction_path: Path) -> list[dict]:
     predictions = []
-    for p in sorted((proj_path / 'experiments' / task).glob(file_pattern), key=lambda x: int(x.stem.split('_')[-1])):
+    for p in sorted((prediction_path).glob(file_pattern), key=lambda x: int(x.stem.split('_')[-1])):
         with p.open() as f:
             for line in f:
                 predictions.append(json.loads(line))
     return predictions
-
 
 def get_output_results(predictions: list[dict], spider_tables: dict[str, DatabaseModel]) -> tuple[list[dict], dict[str, list]]:
     output_results = []
@@ -155,6 +155,14 @@ def get_output_results(predictions: list[dict], spider_tables: dict[str, Databas
     return output_results, error_infos
 
 if __name__ == '__main__':
+    """
+    bird:
+    python run_zeroshot.py --ds bird \
+        --type train \
+        --model gpt-4o-mini \
+        --task zero_shot \
+        --description_file bird_description.json
+    """
     parser = argparse.ArgumentParser(description='Zero-shot SQL generation with OpenAI')
     parser.add_argument('--ds', type=str, default='spider', help='Dataset to use for training. spider or bird') 
     parser.add_argument('--table_file', type=str, default='tables.json', help='File containing the tables.')
@@ -162,7 +170,7 @@ if __name__ == '__main__':
     parser.add_argument('--type', type=str, default='train', help='Type of data to use for .')
     parser.add_argument('--model', type=str, default='gpt-4o-mini', help='Model to use for training.')
     parser.add_argument('--task', type=str, default='zero_shot', help='`zero_shot` or `post_process` or `output_result_plus`')
-    
+    parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -173,16 +181,19 @@ if __name__ == '__main__':
         'google-generative-ai': ChatGoogleGenerativeAI
     }
 
-    with (proj_path / 'data' / args.ds / args.table_file).open() as f:
-        tables = json.load(f)
+    data_path = proj_path / 'data' / args.ds
+    experiment_folder = proj_path / 'experiments' / f'{args.ds}'
+    tables, *_ = load_raw_data(data_path, load_test=False)
 
     with (proj_path / 'data' / args.description_file).open() as f:
         all_descriptions = json.load(f)
-    spider_tables = process_all_tables(tables, descriptions=all_descriptions)
+    tables = process_all_tables(tables, descriptions=all_descriptions)
 
-    eval_path = proj_path / 'experiments' / 'evals'
+    eval_path = experiment_folder / 'evals'
     if not eval_path.exists():
         eval_path.mkdir(parents=True)
+
+    prediction_path = experiment_folder / 'predictions' / f'{args.task}'
         
     if args.task == 'zero_shot':
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
@@ -201,12 +212,12 @@ if __name__ == '__main__':
         chain = (prompt | model)
 
         # run zero-shot SQL generation
-        predict_sql(samples, spider_tables, chain, k=500, file_name=f'{args.ds}_{args.type}')
+        predict_sql(samples, tables, chain, prediction_path, 
+                    k=500, file_name=f'{args.ds}_{args.type}')
 
     elif args.task == 'post_process':
-        
-        predictions = load_predictions(f'{args.ds}_{args.type}_*')
-        output_results, errors = get_output_results(predictions, spider_tables)
+        predictions = load_predictions(f'{args.ds}_{args.type}_*', prediction_path)
+        output_results, errors = get_output_results(predictions, tables)
         with open(eval_path / f'{args.ds}_{args.type}_eval.json', 'w') as f:
             json.dump(output_results, f)
         
@@ -214,11 +225,12 @@ if __name__ == '__main__':
             json.dump(errors, f)
 
     elif args.task == 'output_result_plus':
-        with open(eval_path / f'{args.ds}_{args.type}_eval.json') as f:
-            output_results = json.load(f)
-        get_output_result_plus(output_results, f'{args.ds}_{args.type}_plus')
-        data_plus = load_plus_data(f'{args.ds}_{args.type}_plus')
-        df_eval = eval_all_dataset(data_plus)
-        df_eval.to_csv(eval_path / f'{args.ds}_{args.type}_eval_plus.csv', index=False)
+        # with open(eval_path / f'{args.ds}_{args.type}_eval.json') as f:
+        #     output_results = json.load(f)
+        # get_output_result_plus(output_results, f'{args.ds}_{args.type}_plus')
+        # data_plus = load_plus_data(f'{args.ds}_{args.type}_plus')
+        # df_eval = eval_all_dataset(data_plus)
+        # df_eval.to_csv(eval_path / f'{args.ds}_{args.type}_eval_plus.csv', index=False)
+        pass
     else:
         raise ValueError(f'Unknown task: {args.task}, must be one of `zero_shot`, `post_process`, `output_result_plus`')
