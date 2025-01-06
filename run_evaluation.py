@@ -3,6 +3,7 @@ import pickle
 import argparse
 import sqlglot
 import sqlglot.expressions as exp
+import pandas as pd
 from collections import defaultdict
 from tqdm import tqdm
 from pathlib import Path
@@ -204,6 +205,7 @@ def get_pred_results(
                 }
             )
 
+        # TODO: remane it as jsonl
         with open(eval_path / f'{file_name}_{db_id}.json', 'w') as f:
             for res in output_results:
                 f.write(json.dumps(res) + '\n')
@@ -273,7 +275,6 @@ if __name__ == '__main__':
     with (eval_path / file_name).open('rb') as f:
         pred_parsed = pickle.load(f)
 
-
     get_pred_results(
         proj_path,
         eval_path,
@@ -285,3 +286,12 @@ if __name__ == '__main__':
         ds=args.ds,
         split_k=2
     )
+
+    # save it as dataframe
+    df = []
+    for p in eval_path.glob(f'{args.ds}_{args.type}_*.json'):
+        with p.open() as f:
+            for line in f:
+                eval_data = json.loads(line)
+                df.append(eval_data)
+    pd.DataFrame(df).to_csv(eval_path / f'{args.ds}_{args.type}.csv', index=False)
