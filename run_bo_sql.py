@@ -14,7 +14,11 @@ from langchain_core.runnables import RunnableSequence
 from langchain_community.vectorstores import FAISS
 from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_openai.embeddings import OpenAIEmbeddings
+from langchain_core.retrievers import BaseRetriever
 from langchain_core.prompts import PromptTemplate
+from langchain.retrievers import ContextualCompressionRetriever
+from langchain.retrievers.document_compressors import CrossEncoderReranker
+from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 
 from src.prompts import Prompts
 from src.pymodels import SQLResponse, DatabaseModel, BirdSample, SpiderSample, BODescription
@@ -83,7 +87,6 @@ def get_vector_store(bos: dict[str, list[dict[str, str]]]):
     for db_id, samples in bos.items():
         for x in samples:
             doc = Document(
-                doc_id=x['sample_id'],
                 page_content=x['ba'],
                 metadata={
                     'sample_id': x['sample_id'],
@@ -100,6 +103,31 @@ def get_vector_store(bos: dict[str, list[dict[str, str]]]):
     )
     return vectorstore
 
+def get_retriever(
+        vectorstore: FAISS,
+        cross_encoder: HuggingFaceCrossEncoder,
+        db_id: str,
+        n_retrieval: int = 3,
+        k_retrieval: int = 10,
+        score_threshold: float = 0.60,
+        use_reranker: bool = True
+    ) -> BaseRetriever:
+    k_retrieval = k_retrieval if use_reranker else n_retrieval
+    base_retriever = vectorstore.as_retriever(
+        search_type='similarity_score_threshold',
+        search_kwargs={'k': k_retrieval, 
+                       'score_threshold': score_threshold, 
+                       'filter': {'db_id': db_id}}
+    )
+    if use_reranker:
+        compressor = CrossEncoderReranker(model=cross_encoder, top_n=n_retrieval)
+        retriever = ContextualCompressionRetriever(
+            base_compressor=compressor, base_retriever=base_retriever
+        )
+    else:
+        retriever = base_retriever
+    return retriever
+
 def predict_sql_bo(
         to_pred_samples: list[SpiderSample|BirdSample],
         tables: dict[DatabaseModel],
@@ -108,8 +136,10 @@ def predict_sql_bo(
         prediction_path: Path,
         file_name: str = '[args.ds]_[args.type]',
         split_k: int = 2,
+        k_retrieval: int = 10,
         n_retrieval: int = 3,
         score_threshold: float = 0.65,
+        use_reranker: bool = True
     ):
     processed_db_ids = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
     # restart from checkpoint
@@ -121,9 +151,14 @@ def predict_sql_bo(
     for sample in to_pred_samples:
         samples_by_db_id[sample.db_id].append(sample)
 
+    if use_reranker:
+        cross_encoder = HuggingFaceCrossEncoder(model='cross-encoder/ms-marco-MiniLM-L-6-v2')
+    else:
+        cross_encoder = None
     for db_id, samples in samples_by_db_id.items():
-        retriever = vectorstore.as_retriever(
-            search_kwargs={'k': n_retrieval, 'score_threshold': score_threshold, 'filter': {'db_id': db_id}}
+        retriever = get_retriever(
+            vectorstore, cross_encoder, db_id, 
+            n_retrieval, k_retrieval, score_threshold, use_reranker
         )
         schema_str = get_schema_str(
             schema=tables[db_id].db_schema, 
@@ -144,6 +179,7 @@ def predict_sql_bo(
             full_sql_output['sample_id'] = sample.sample_id
             full_sql_output['rationale'] = output.rationale
             full_sql_output['pred_sql'] = output.full_sql_query
+            full_sql_output['retrieved'] = [doc.metadata['sample_id'] for doc in docs]
             # full_sql_output = 1
             results.append(full_sql_output)
 
@@ -156,10 +192,11 @@ if __name__ == '__main__':
     parser.add_argument('--ds', type=str, default='spider', help='Dataset to use for training. spider or bird') 
     parser.add_argument('--type', type=str, default='train', help='Type of data to use for .')
     parser.add_argument('--description_file', type=str, default='description.json', help='File containing the descriptions.')
-    parser.add_argument('--n_retrieval', type=int, default=3, help='Number of retrievals to consider')
+    parser.add_argument('--k_retrieval', type=int, default=5, help='Number of retrievals for reranker to consider')
+    parser.add_argument('--n_retrieval', type=int, default=1, help='Number of retrievals to consider')
     parser.add_argument('--score_threshold', type=float, default=0.60, help='Score threshold for retrieval')
-    parser.add_argument('--percentile', type=int, default=50, help='Percentile to filter by: 25, 50, 75, any other will not call this filter')
-    parser.add_argument('--k', type=int, default=500, help='Number of samples to process before saving')
+    parser.add_argument('--use_reranker', action='store_true', help='Whether to use reranker or not')
+    # parser.add_argument('--percentile', type=int, default=50, help='Percentile to filter by: 25, 50, 75, any other will not call this filter')
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -237,8 +274,10 @@ if __name__ == '__main__':
             prediction_path=prediction_path, 
             file_name=f'{args.ds}_{args.type}', 
             split_k=2,
+            k_retrieval=args.k_retrieval,
             n_retrieval=args.n_retrieval,
-            score_threshold=args.score_threshold
+            score_threshold=args.score_threshold,
+            use_reranker=args.use_reranker
         )
 
         # -----------------------------------------------------------------
