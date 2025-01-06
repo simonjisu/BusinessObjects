@@ -42,29 +42,6 @@ Your output should be of the following JSON format:
 <INPUT QUERY>: {input_query}
 <OUTPUT>: 
 '''
-    zero_shot_inference_bird = '''### TASK
-You are tasked with generating a SQL query(in a SQLite Database) according to a user input request.
-You should work in step-by-step reasoning before coming to the full SQL query.
-
-You will be provided an input NL query and an evidence as a hint.
-
-### SCHEMA
-You are working with the following schema in a SQLite Database:
-{schema}
-
-### FORMATTING
-Your output should be of the following JSON format:
-{{
-    "rationale": "<list[str]: the step-by-step reasoning to generate the SQL query>",
-    "full_sql_query": "<str: the full SQL query>"
-}}
-
-### OUTPUT
-<INPUT QUERY>: {input_query}
-<EVIDENCE>: {evidence}
-<OUTPUT>: 
-'''
-
     zero_shot_hints_inference = '''### TASK
 You are tasked with generating a SQL query(in a SQLite Database) according to a user input NL question.
 You should work in step-by-step reasoning before coming to the full SQL query.
@@ -127,9 +104,10 @@ Table Name: Employees
     "rationale": [
         "The query is identifing the relevant table, which is 'Employees'.",
         "Select the columns to display, 'first_name' and 'last_name'.",
-        "Add a condition to filter the 'department' column for the specified department using a placeholder for string values."
+        "Also, a condition to filter the 'department' column for the specified department using a placeholder for string values.",
+        "So, the query wants to know the first and last names of employees who belong to a specific department."
     ],
-    "description": "This virtual table describes the first and last names of employees from the 'Employees' table who belong to a specific department. The placeholder in the WHERE clause represents the department's name."
+    "description": "The virtual table describes the first and last names of employees from the 'Employees' table who belong to a specific department. The placeholder in the WHERE clause represents the department's name."
 }}
 
 

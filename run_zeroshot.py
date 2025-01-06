@@ -1,4 +1,5 @@
 import json
+import pickle
 import argparse
 from tqdm import tqdm
 from pathlib import Path
@@ -20,52 +21,51 @@ from src.data_preprocess import (
     load_samples_spider_bird,
     load_raw_data
 )
-# from src.eval_complexity import (
-#     load_plus_data, 
-#     get_output_result_plus, 
-#     eval_all_dataset
-# )
-
+from src.parsing_sql import Schema, extract_all
+from collections import defaultdict
 _ = load_dotenv(find_dotenv())
 
 def predict_sql(
         samples: list[SpiderSample|BirdSample], 
         tables: dict[str, DatabaseModel], 
         chain: RunnableSequence, 
-        experiment_folder: Path,
-        k: int = 500, 
-        file_name: str = 'full_sql_output',
+        prediction_path: Path,
+        split_k: int = 2,
+        file_name: str = '[args.ds]_[args.type]',
     ) -> list[dict]:
-    all_full_sql = list()
-    for i, data in tqdm(enumerate(samples), total=len(samples)):
-        db_schema = get_schema_str(
-            schema=tables[data.db_id].db_schema, 
-            foreign_keys=tables[data.db_id].foreign_keys,
-            col_explanation=tables[data.db_id].col_explanation
-        )
-        input_data = {'schema': db_schema, 'input_query': data.final.question}
-        output = chain.invoke(input=input_data)
+    processed_db_ids = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*.json')]
+    # restart from checkpoint
+    if processed_db_ids:
+        samples = [sample for sample in samples if sample.db_id not in processed_db_ids]
+        print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}')
 
-        full_sql_output = {}
-        full_sql_output['sample_id'] = data.sample_id
-        full_sql_output['db_id'] = data.db_id
-        full_sql_output['question'] = data.final.question
-        full_sql_output['rationale'] = output.rationale
-        full_sql_output['pred_sql'] = output.full_sql_query
-        full_sql_output['gold_sql'] = data.final.sql
-        full_sql_output['source_tables'] = data.final.source_tables
-        all_full_sql.append(full_sql_output)
+    samples_by_db_id = defaultdict(list)
+    for sample in samples:
+        samples_by_db_id[sample.db_id].append(sample)
 
-        if len(all_full_sql) == k:
-            with open(experiment_folder / f'{file_name}_{i//k}.jsonl', 'w') as f:
-                for d in all_full_sql:
-                    f.write(json.dumps(d) + '\n')
-            all_full_sql = list()
+    for db_id, samples in samples_by_db_id.items():
+        results = []
+        for sample in tqdm(samples, total=len(samples), desc=f"{db_id}"):
+            res = {
+                'sample_id': sample.sample_id, 
+                'db_id': sample.db_id,
+                'gold_sql': sample.final.sql,
+            }
 
-    if len(all_full_sql) > 0:
-        with open(experiment_folder / f'{file_name}_{i//k}.jsonl', 'w') as f:
-            for d in all_full_sql:
-                f.write(json.dumps(d) + '\n')
+            db_schema = get_schema_str(
+                schema=tables[sample.db_id].db_schema, 
+                foreign_keys=tables[sample.db_id].foreign_keys,
+                col_explanation=tables[sample.db_id].col_explanation
+            )
+            input_data = {'schema': db_schema, 'input_query': sample.final.question}
+            output = chain.invoke(input=input_data)
+
+            res['rationale'] = output.rationale
+            res['pred_sql'] = output.full_sql_query
+            results.append(res)
+        
+        with (prediction_path / f'{file_name}_{db_id}.json').open('w') as f:
+            json.dump(results, f, indent=4)
 
 def load_predictions(file_pattern: str, prediction_path: Path) -> list[dict]:
     predictions = []
@@ -75,85 +75,6 @@ def load_predictions(file_pattern: str, prediction_path: Path) -> list[dict]:
                 predictions.append(json.loads(line))
     return predictions
 
-def get_output_results(predictions: list[dict], spider_tables: dict[str, DatabaseModel]) -> tuple[list[dict], dict[str, list]]:
-    output_results = []
-    error_infos = {
-        'pred_exec': [],
-        'gold_exec': [],
-        'python_script': [],
-        'result': []
-    }
-
-    iterator = tqdm(predictions, total=len(predictions))
-    for data in iterator:
-        iterator.set_description(f'pred_exec: {len(error_infos["pred_exec"])} | gold_exec: {len(error_infos["gold_exec"])} | python_script: {len(error_infos["python_script"])} | result: {len(error_infos["result"])}')
-        sample_id = data['sample_id']
-        db_id = data['db_id']
-        table = spider_tables[db_id]
-        database = SqliteDatabase(str(proj_path / 'data' / 'spider' / 'database' / db_id / f'{db_id}.sqlite'), foreign_keys=table.foreign_keys)
-        pred_sql = data['pred_sql'] # sqlglot.parse_one(, read='sqlite').sql()
-        gold_sql = data['gold_sql']
-        question = data['question']
-        
-        error_info = ''
-        try:
-            pred_result = database.execute(pred_sql, rt_pandas=False)
-        except Exception as e:
-            pred_result = []
-            error_infos['pred_exec'].append(sample_id)
-            error_info = 'Predction Execution Error:' + str(e)
-            score = 0
-        try:
-            gold_result = database.execute(gold_sql, rt_pandas=False)
-        except Exception as e:
-            error_infos['gold_exec'].append(sample_id)
-            error_info = 'Gold Execution Error:' + str(e)
-
-        if 'Gold Execution Error' in error_info:
-            continue
-        elif 'Predction Execution Error' in error_info:
-            output_results.append(
-                {
-                    'sample_id': sample_id, 
-                    'db_id': db_id,
-                    'question': question,
-                    'score': score,
-                    'gold_sql': gold_sql,
-                    'pred_sql': pred_sql,
-                    'source_tables': data['source_tables'],
-                    'error_info': error_info
-                }
-            )
-            continue
-        else:
-            exists_orderby = check_if_exists_orderby(gold_sql)
-            
-            try:
-                score = int(result_eq(pred_result, gold_result, order_matters=exists_orderby))
-            except Exception as e:
-                print(f"An error occurred: {e}")
-                score = 0
-                error_info = 'Python Script Error:' + str(e)
-                error_infos['python_script'].append(sample_id)
-
-            if score == 0 and error_info == '':
-                error_info = 'Result not equal'
-                error_infos['result'].append(sample_id)
-            output_results.append(
-                {
-                    'sample_id': sample_id, 
-                    'db_id': db_id,
-                    'question': question,
-                    'score': score,
-                    'gold_sql': gold_sql,
-                    'pred_sql': pred_sql,
-                    'source_tables': data['source_tables'],
-                    'error_info': error_info
-                }
-            )
-
-    return output_results, error_infos
-
 if __name__ == '__main__':
     """
     bird:
@@ -161,16 +82,17 @@ if __name__ == '__main__':
         --type train \
         --model gpt-4o-mini \
         --task zero_shot \
-        --description_file bird_description.json
+        --description_file bird_description.json \
+        --k 500
     """
     parser = argparse.ArgumentParser(description='Zero-shot SQL generation with OpenAI')
     parser.add_argument('--ds', type=str, default='spider', help='Dataset to use for training. spider or bird') 
-    parser.add_argument('--table_file', type=str, default='tables.json', help='File containing the tables.')
     parser.add_argument('--description_file', type=str, default='description.json', help='File containing the descriptions.')
     parser.add_argument('--type', type=str, default='train', help='Type of data to use for .')
     parser.add_argument('--model', type=str, default='gpt-4o-mini', help='Model to use for training.')
     parser.add_argument('--task', type=str, default='zero_shot', help='`zero_shot` or `post_process` or `output_result_plus`')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
+    parser.add_argument('--k', type=int, default=500, help='Number of samples to process at a time.')
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -183,18 +105,18 @@ if __name__ == '__main__':
 
     data_path = proj_path / 'data' / args.ds
     experiment_folder = proj_path / 'experiments' / f'{args.ds}'
+    prediction_path = experiment_folder / 'predictions' / f'{args.task}'
+    eval_path = experiment_folder / 'evals' / f'{args.task}'
+    for p in [prediction_path, eval_path]:
+        if not p.exists():
+            p.mkdir(parents=True)
+
     tables, *_ = load_raw_data(data_path, load_test=False)
 
     with (proj_path / 'data' / args.description_file).open() as f:
         all_descriptions = json.load(f)
     tables = process_all_tables(tables, descriptions=all_descriptions)
 
-    eval_path = experiment_folder / 'evals'
-    if not eval_path.exists():
-        eval_path.mkdir(parents=True)
-
-    prediction_path = experiment_folder / 'predictions' / f'{args.task}'
-        
     if args.task == 'zero_shot':
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
         print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')    
@@ -206,31 +128,47 @@ if __name__ == '__main__':
         model_openai = ChatOpenAI(
             model='gpt-4o-mini',
             temperature=0.0,
+            frequency_penalty=0.1,
         )
 
         model = model_openai.with_structured_output(SQLResponse)
         chain = (prompt | model)
 
         # run zero-shot SQL generation
-        predict_sql(samples, tables, chain, prediction_path, 
-                    k=500, file_name=f'{args.ds}_{args.type}')
-
-    elif args.task == 'post_process':
-        predictions = load_predictions(f'{args.ds}_{args.type}_*', prediction_path)
-        output_results, errors = get_output_results(predictions, tables)
-        with open(eval_path / f'{args.ds}_{args.type}_eval.json', 'w') as f:
-            json.dump(output_results, f)
+        predict_sql(samples, tables, chain, prediction_path, split_k=2,
+                    file_name=f'{args.ds}_{args.type}')
         
-        with open(eval_path / f'{args.ds}_{args.type}_errors.json', 'w') as f:
-            json.dump(errors, f)
+        predictions = []
+        for p in prediction_path.glob(f'{args.ds}_{args.type}_*.json'):
+            with open(p) as f:
+                pred = json.load(f)
+                new_pred = []
+                for x in pred:
+                    x.pop('rationale')
+                    new_pred.append(x)
+                predictions.extend(new_pred)
 
-    elif args.task == 'output_result_plus':
-        # with open(eval_path / f'{args.ds}_{args.type}_eval.json') as f:
-        #     output_results = json.load(f)
-        # get_output_result_plus(output_results, f'{args.ds}_{args.type}_plus')
-        # data_plus = load_plus_data(f'{args.ds}_{args.type}_plus')
-        # df_eval = eval_all_dataset(data_plus)
-        # df_eval.to_csv(eval_path / f'{args.ds}_{args.type}_eval_plus.csv', index=False)
-        pass
-    else:
-        raise ValueError(f'Unknown task: {args.task}, must be one of `zero_shot`, `post_process`, `output_result_plus`')
+        with open(prediction_path / f'final_{args.ds}_{args.type}.jsonl', 'w') as f:
+            for p in predictions:
+                f.write(json.dumps(p) + '\n')
+
+
+    # elif args.task == 'post_process':
+    #     predictions = load_predictions(f'{args.ds}_{args.type}_*', prediction_path)
+    #     output_results, errors = get_output_results(predictions, tables)
+    #     with open(eval_path / f'{args.ds}_{args.type}_eval.json', 'w') as f:
+    #         json.dump(output_results, f)
+        
+    #     with open(eval_path / f'{args.ds}_{args.type}_errors.json', 'w') as f:
+    #         json.dump(errors, f)
+
+    # elif args.task == 'output_result_plus':
+    #     # with open(eval_path / f'{args.ds}_{args.type}_eval.json') as f:
+    #     #     output_results = json.load(f)
+    #     # get_output_result_plus(output_results, f'{args.ds}_{args.type}_plus')
+    #     # data_plus = load_plus_data(f'{args.ds}_{args.type}_plus')
+    #     # df_eval = eval_all_dataset(data_plus)
+    #     # df_eval.to_csv(eval_path / f'{args.ds}_{args.type}_eval_plus.csv', index=False)
+    #     pass
+    # else:
+    #     raise ValueError(f'Unknown task: {args.task}, must be one of `zero_shot`, `post_process`, `output_result_plus`')

@@ -65,13 +65,13 @@ def process_all_tables(tables: list, descriptions: Optional[dict[str, dict[str, 
         )
     return database
 
-def filter_samples_by_count_sparc(all_data: dict, n: int=5) -> list:
-    counter = defaultdict(int)
-    for data in all_data:
-        db_id = data['database_id']
-        counter[db_id] += 1
-    all_data = list(filter(lambda x: counter[x['database_id']] >= n, all_data))
-    return all_data
+# def filter_samples_by_count_sparc(all_data: dict, n: int=5) -> list:
+#     counter = defaultdict(int)
+#     for data in all_data:
+#         db_id = data['database_id']
+#         counter[db_id] += 1
+#     all_data = list(filter(lambda x: counter[x['database_id']] >= n, all_data))
+#     return all_data
 
 def extract_used_table(sql: str, schema: dict) -> list[str]:
     sql = sqlglot.parse_one(sql, read='sqlite')
@@ -79,38 +79,38 @@ def extract_used_table(sql: str, schema: dict) -> list[str]:
     tbls = set([x.this.this.lower() for x in list(sql.find_all(exp.Table))])
     return tbls
 
-def process_samples_sparc(all_data: list[dict], tables: dict[str, DatabaseModel], skip: Optional[list]=[]) -> dict[str, list[SparcSample]]:
-    data_by_db_id = defaultdict(list)
-    for i, data in tqdm(enumerate(all_data), total=len(all_data)):
-        if i in skip:
-            continue
-        db_id = data['database_id']
-        schema = tables[db_id].db_schema
+# def process_samples_sparc(all_data: list[dict], tables: dict[str, DatabaseModel], skip: Optional[list]=[]) -> dict[str, list[SparcSample]]:
+#     data_by_db_id = defaultdict(list)
+#     for i, data in tqdm(enumerate(all_data), total=len(all_data)):
+#         if i in skip:
+#             continue
+#         db_id = data['database_id']
+#         schema = tables[db_id].db_schema
 
-        interactions = []
-        for x in data['interaction']:
-            sql = preprocess_sql(x['query'])
-            tbls = extract_used_table(sql, schema)
-            interactions.append(QuestionSQL(question=x['utterance'], sql=sql, source_tables=tbls))
+#         interactions = []
+#         for x in data['interaction']:
+#             sql = preprocess_sql(x['query'])
+#             tbls = extract_used_table(sql, schema)
+#             interactions.append(QuestionSQL(question=x['utterance'], sql=sql, source_tables=tbls))
 
-        final_sql = preprocess_sql(data['final']['query'])
-        try:
-            final_tbls = extract_used_table(final_sql, schema)
-        except Exception as e:
-            print(f'Warning Skipped: {db_id} - {i}')
-            continue
+#         final_sql = preprocess_sql(data['final']['query'])
+#         try:
+#             final_tbls = extract_used_table(final_sql, schema)
+#         except Exception as e:
+#             print(f'Warning Skipped: {db_id} - {i}')
+#             continue
 
-        final = QuestionSQL(question=data['final']['utterance'], sql=final_sql, source_tables=final_tbls)
+#         final = QuestionSQL(question=data['final']['utterance'], sql=final_sql, source_tables=final_tbls)
 
-        sample = SparcSample(
-            sample_id=i,
-            db_id=db_id,
-            interactions=interactions,
-            final=final
-        )
-        data_by_db_id[db_id].append(sample)
+#         sample = SparcSample(
+#             sample_id=i,
+#             db_id=db_id,
+#             interactions=interactions,
+#             final=final
+#         )
+#         data_by_db_id[db_id].append(sample)
 
-    return data_by_db_id
+#     return data_by_db_id
 
 def filter_samples_by_count_spider_bird(all_data: dict, n: int=5) -> list:
     counter = defaultdict(int)
@@ -271,18 +271,21 @@ def get_bird_description(proj_path: Path):
             df = pd.read_csv(p / f'{t}.csv', encoding='utf-8')
             df['value_description'] = df['value_description'].astype(str)
             df.loc[df['value_description'] == 'nan', 'value_description'] = ''
+            df.loc[df['value_description'] != '', 'value_description'] = '  ' + df.loc[df['value_description'] != '', 'value_description'].str.replace('\t', '').str.replace('\n\n', '\n').str.replace('\n', ' ')
 
             if sum(df['column_description'].isnull()) > 0:
                 idx = df['column_description'].isnull()
                 df['column_description'] = df['column_description'].astype(str)
                 df.loc[idx, ['column_description']] = df['original_column_name'].str.lower()
 
-            df['desc'] = df['column_description'] + ' ' + df['value_description'].str.replace('commonsense evidence:', '\n').str.replace('commonsense reasoning:', '\n').str.replace('Commonsense evidence:', '\n')
+            description_str = df['column_description'].str.replace('\t', '').str.replace('\n', '') + df['value_description']
+
+            df['desc'] = description_str
             desc[t] = dict(df.loc[:, ['original_column_name', 'desc']].values)
         database_description[db_id] = desc
 
     with (proj_path / 'data' / 'bird_description.json').open('w') as f:
-        json.dump(database_description, f, indent=2)
+        json.dump(database_description, f)
 
 def save_samples_spider_bird(samples: list[SpiderSample|BirdSample], path: Path):
     with path.open('w') as f:
@@ -307,16 +310,17 @@ def load_samples_spider_bird(path: Path) -> list[SpiderSample|BirdSample]:
         with path.open() as f:
             for line in f:
                 data = json.loads(line)
-                sample = BirdSample(
-                    sample_id=data['sample_id'],
-                    db_id=data['db_id'],
-                    final=QuestionSQL(
-                        question=data['final']['question'],
-                        sql=data['final']['sql'],
-                        source_tables=data['final']['source_tables']
-                    ),
-                    evidence=data['evidence']
-                )
+                sample = BirdSample(**data)
+                # sample = BirdSample(
+                #     sample_id=data['sample_id'],
+                #     db_id=data['db_id'],
+                #     final=QuestionSQL(
+                #         question=data['final']['question'],
+                #         sql=data['final']['sql'],
+                #         source_tables=data['final']['source_tables']
+                #     ),
+                #     evidence=data['evidence']
+                # )
                 samples.append(sample)
     else:
         with path.open() as f:
@@ -335,78 +339,78 @@ def load_samples_spider_bird(path: Path) -> list[SpiderSample|BirdSample]:
 
     return samples
 
-def save_samples_sparc(samples: list[SparcSample], path: Path):
-    with path.open('w') as f:
-        for s in samples:
-            data = {
-                'sample_id': s.sample_id,
-                'db_id': s.db_id,
-                'interactions': [],
-                'final': {
-                    'question': s.final.question,
-                    'sql': s.final.sql,
-                    'source_tables': s.final.source_tables
-                }
-            }
-            for i in s.interactions:
-                data['interactions'].append({
-                    'question': i.question,
-                    'sql': i.sql,
-                    'source_tables': i.source_tables
-                })
-            data_json = json.dumps(data)
-            f.write(data_json+'\n')
+# def save_samples_sparc(samples: list[SparcSample], path: Path):
+#     with path.open('w') as f:
+#         for s in samples:
+#             data = {
+#                 'sample_id': s.sample_id,
+#                 'db_id': s.db_id,
+#                 'interactions': [],
+#                 'final': {
+#                     'question': s.final.question,
+#                     'sql': s.final.sql,
+#                     'source_tables': s.final.source_tables
+#                 }
+#             }
+#             for i in s.interactions:
+#                 data['interactions'].append({
+#                     'question': i.question,
+#                     'sql': i.sql,
+#                     'source_tables': i.source_tables
+#                 })
+#             data_json = json.dumps(data)
+#             f.write(data_json+'\n')
 
-def load_samples_sparc(path: Path) -> list[SparcSample]:
-    samples = []
-    with path.open() as f:
-        for line in f:
-            data = json.loads(line)
-            interactions = []
-            for i in data['interactions']:
-                interactions.append(QuestionSQL(
-                    question=i['question'],
-                    sql=i['sql'],
-                    source_tables=i['source_tables']
-                ))
-            sample = SparcSample(
-                sample_id=data['sample_id'],
-                db_id=data['db_id'],
-                interactions=interactions,
-                final=QuestionSQL(
-                    question=data['final']['question'],
-                    sql=data['final']['sql'],
-                    source_tables=data['final']['source_tables']
-                )
-            )
-            samples.append(sample)
-    return samples
+# def load_samples_sparc(path: Path) -> list[SparcSample]:
+#     samples = []
+#     with path.open() as f:
+#         for line in f:
+#             data = json.loads(line)
+#             interactions = []
+#             for i in data['interactions']:
+#                 interactions.append(QuestionSQL(
+#                     question=i['question'],
+#                     sql=i['sql'],
+#                     source_tables=i['source_tables']
+#                 ))
+#             sample = SparcSample(
+#                 sample_id=data['sample_id'],
+#                 db_id=data['db_id'],
+#                 interactions=interactions,
+#                 final=QuestionSQL(
+#                     question=data['final']['question'],
+#                     sql=data['final']['sql'],
+#                     source_tables=data['final']['source_tables']
+#                 )
+#             )
+#             samples.append(sample)
+#     return samples
 
 
 if __name__ == '__main__':
     _ = load_dotenv(find_dotenv())
     
     proj_path = Path('.').resolve()
-    sparc_path = proj_path / 'data' / 'sparc'
-    with (proj_path / 'data' / 'description.json').open() as f:
-        all_descriptions = json.load(f)
+    # sparc_path = proj_path / 'data' / 'sparc'
+    # with (proj_path / 'data' / 'description.json').open() as f:
+    #     all_descriptions = json.load(f)
 
-    tables, train_data, dev_data = load_raw_data(sparc_path)
-    print(f'Number of train: {len(train_data)} | Number of dev: {len(dev_data)}')
+    # tables, train_data, dev_data = load_raw_data(sparc_path)
+    # print(f'Number of train: {len(train_data)} | Number of dev: {len(dev_data)}')
     
-    sparc_tables = process_all_tables(tables)
-    # filter samples by count, must have at least 5 samples
-    all_data = filter_samples_by_count_sparc(train_data+dev_data, n=5)
-    # process samples -> {db_id: list of samples}
-    sparc_samples = process_samples_sparc(all_data)
-    # change train/dev by sample
-    train_samples, dev_samples, test_samples = split_train_dev_test(sparc_samples, train_ratio=0.8, dev_ratio=0.1)
+    # sparc_tables = process_all_tables(tables)
+    # # filter samples by count, must have at least 5 samples
+    # all_data = filter_samples_by_count_sparc(train_data+dev_data, n=5)
+    # # process samples -> {db_id: list of samples}
+    # sparc_samples = process_samples_sparc(all_data)
+    # # change train/dev by sample
+    # train_samples, dev_samples, test_samples = split_train_dev_test(sparc_samples, train_ratio=0.8, dev_ratio=0.1)
     
-    save_samples_sparc(train_samples, proj_path / 'data' / 'sparc_train.json')
-    save_samples_sparc(dev_samples, proj_path / 'data' / 'sparc_dev.json')
+    # save_samples_sparc(train_samples, proj_path / 'data' / 'sparc_train.json')
+    # save_samples_sparc(dev_samples, proj_path / 'data' / 'sparc_dev.json')
 
-    # get description
-    get_sparc_schema_description(proj_path, sparc_tables)
+    # # get description
+    # get_sparc_schema_description(proj_path, sparc_tables)
 
     # --------------------------------------------------------------------------------------------
     # spider dataset

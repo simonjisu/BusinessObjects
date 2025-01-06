@@ -1,7 +1,6 @@
 #!/bin/bash
-uv run run_zeroshot.py \
+uv run run_bo_sql.py \
     --ds bird \
     --type train \
-    --model gpt-4o-mini \
-    --task zero_shot \
+    --task create_bo \
     --description_file bird_description.json

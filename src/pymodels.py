@@ -9,7 +9,7 @@ class SQLResponse(BaseModel):
     rationale: list[str] = Field(description='The step-by-step reasoning to generate the SQL query. ')
 
 class BODescription(BaseModel):
-    output: str = Field(description='The a clear and concise summary of the complex data model.')
+    description: str = Field(description='The a clear and concise summary of the complex data model.')
     rationale: list[str] = Field(description='The step-by-step reasoning to generate the SQL query.')
 
 class DatabaseModel(BaseModel):
