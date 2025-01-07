@@ -167,3 +167,4 @@ data/tpch/tpch.db
 data/tpch/tables
 data/spider
 data/pkl_files/
+*.zip
