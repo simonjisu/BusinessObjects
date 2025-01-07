@@ -430,7 +430,7 @@ if __name__ == '__main__':
                 eval_data = json.load(f)
             df.extend(eval_data)
         pd.DataFrame(df).to_csv(eval_path / f'{args.ds}_{args.type}.csv', index=False)
-        
+
     elif args.task == 'valid_bo':
         # valid_bo
         paths = list(prediction_path.glob(f'{args.ds}_{args.type}_*.jsonl'))
@@ -456,3 +456,5 @@ if __name__ == '__main__':
             file_name=f'{args.ds}_{args.type}',
             ds=args.ds,
         )
+    else:
+        raise ValueError(f'Invalid task: {args.task}')
