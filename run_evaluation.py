@@ -53,12 +53,12 @@ def get_target_parsed_sql(samples: list, tables: dict):
         parsed[db_id][sample_id] = ei
     return parsed, error_ids
 
-def get_prediction_parsed_sql(predictions: list, tables: dict):
+def get_prediction_parsed_sql(predictions: list, tables: dict, patch_db_id: str=None):
     error_ids = []
     parsed = defaultdict(dict)
     iterator = tqdm(predictions, total=len(predictions))
     for pred in iterator:
-        db_id = pred['db_id']
+        db_id = pred['db_id'] if patch_db_id is None else patch_db_id
         pred_sql = pred['pred_sql']
         sample_id = pred['sample_id']
         iterator.set_description(f"{db_id}")
@@ -252,7 +252,7 @@ def get_pred_results_valid_bo(
         # get pred_parsed_sql 
         file_name = f'{p.stem}_parsed_pred.pkl'
         if not (eval_path / file_name).exists():
-            pred_parsed, _ = get_prediction_parsed_sql(preds, tables)
+            pred_parsed, _ = get_prediction_parsed_sql(preds, tables, patch_db_id=db_id)
             with open(eval_path / file_name, 'wb') as f:
                 pickle.dump(pred_parsed, f)
             # print(f'Error parsing pred {args.ds}_{args.type}: {len(error_ids)}')
