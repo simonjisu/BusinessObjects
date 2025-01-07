@@ -262,7 +262,7 @@ def get_pred_results_valid_bo(
 
         iterator = tqdm(preds, total=len(preds))
         for pred in iterator:
-            iterator.set_description(f'{db_id} | pred_exec: {len(error_infos["pred_exec"])} | gold_exec: {len(error_infos["gold_exec"])} | python_script: {len(error_infos["python_script"])} | result: {len(error_infos["result"])}')
+            iterator.set_description(f'{p.stem} | pred_exec: {len(error_infos["pred_exec"])} | gold_exec: {len(error_infos["gold_exec"])} | python_script: {len(error_infos["python_script"])} | result: {len(error_infos["result"])}')
             train_bo_id = pred['retrieved']
             if not pred_res[db_id].get(train_bo_id):
                 pred_res[db_id][train_bo_id] = []
