@@ -1,0 +1,167 @@
+[
+    {
+        "instance_id": "b1",
+        "name": "PRICING_SUMMARY",
+        "ref_id": "q1",
+        "business_abstraction": "The Pricing Summary Report provides a summary pricing report for all lineitems shipped. The report lists totals for extended price, discounted extended price, discounted extended price plus tax, average quantity, average extended price, and average discount. These aggregates are grouped by RETURNFLAG and LINESTATUS, and listed in ascending order of RETURNFLAG and LINESTATUS. A count of the number of lineitems in each group is included.",
+        "virtual_table": "bo_new/b1.tpl"
+    },
+    {
+        "instance_id": "b1.1",
+        "requires": "b1",
+        "name": "PRICING_SUMMARY_BY_PERIOD",
+        "ref_id": "q1",
+        "business_abstraction": "The PRICING_SUMMARY_BY_PERIOD provides a summary pricing report for all lineitems shipped as of a given date. The date is within a period (args:period) of the greatest ship date contained in the database. The query lists totals for extended price, discounted extended price, discounted extended price plus tax, average quantity, average extended price, and average discount. These aggregates are grouped by RETURNFLAG and LINESTATUS, and listed in ascending order of RETURNFLAG and LINESTATUS. A count of the number of lineitems in each group is included.",
+        "virtual_table": "bo_new/b1.1.tpl"
+    },
+    {
+        "instance_id": "b2",
+        "name": "MINIMUM_COST_SUPPLYCOST",
+        "ref_id": "q2",
+        "business_abstraction": "The MINIMUM_COST_SUPPLYCOST finds the supplier who can be used to place an order for each part key, in a region(r_name). The supplier should supply the part at minimum cost.",
+        "virtual_table": "bo_new/b2.tpl"
+    },
+    {
+        "instance_id": "b2.1",
+        "requires": "b2",
+        "name": "MINIMUM_COST_SUPPLIER_TOP100",
+        "ref_id": "q2",
+        "business_abstraction": "The MINIMUM_COST_SUPPLIER_TOP100 finds which supplier should be selected to place an order for a given part in a given region. It finds, in a given region(args:r_name), for each part of a certain type(args:p_type) and size(args:p_size), the supplier who can supply it at minimum cost. If several suppliers in that region offer the desired part type and size at the same (minimum) cost, the query lists the parts from suppliers with the 100 highest account balances. For each supplier, the query lists the supplier's account balance, name and nation; the part's number and manufacturer; the supplier's address, phone number and comment information.",
+        "virtual_table": "bo_new/b2.1.tpl"
+    },
+    {
+        "instance_id": "b3",
+        "name": "UNSHIPPED_ORDERS_HIGHEST_VALUE",
+        "ref_id": "q3",
+        "business_abstraction": "The UNSHIPPED_ORDERS_HIGHEST_VALUE retrieves unshipped orders with the revenue. It retrieves the potential revenue, defined as the sum of l_extendedprice * (1-l_discount), of the orders having the largest revenue among those that had not been shipped as of a given date(args:date) and customer market segment(args:c_mktsegment). Orders are listed in decreasing order of revenue.",
+        "virtual_table": "bo_new/b3.tpl"
+    },
+    {
+        "instance_id": "b3.1",
+        "requires": "b3",
+        "name": "UNSHIPPED_ORDERS_10_HIGHEST_VALUE",
+        "ref_id": "q3",
+        "business_abstraction": "The UNSHIPPED_ORDERS_10_HIGHEST_VALUE retrieves the 10 unshipped orders with the highest value. It retrieves the shipping priority and potential revenue, defined as the sum of l_extendedprice * (1-l_discount), of the orders having the largest revenue among those that had not been shipped as of a given date(args:date) and customer market segment(args:c_mktsegment). Orders are listed in decreasing order of revenue. If more than 10 unshipped orders exist, only the 10 orders with the largest revenue are listed.",
+        "virtual_table": "bo_new/b3.1.tpl"
+    },
+    {
+        "instance_id": "b4",
+        "name": "LATE_DELIVERY_ORDERS",
+        "ref_id": "q4",
+        "business_abstraction": "The LATE_DELIVERY_ORDERS counts the number of orders ordered in a given quarter of a given date(args:date) in which at least one lineitem was received by the customer later than its committed date.",
+        "virtual_table": "bo_new/b4.tpl"
+    },
+    {
+        "instance_id": "b4.1",
+        "requires": "b4",
+        "name": "ORDER_PRIORITY_CHECKING_3MONTHS",
+        "ref_id": "q4",
+        "business_abstraction": "This ORDER_PRIORITY_CHECKING_3MONTHS determines how well the order priority system is working and gives an assessment of customer satisfaction. It counts the number of orders ordered in a given quarter of a given date(args:date) in which at least one lineitem was received by the customer later than its committed date. The query lists the count of such orders for each order priority sorted in ascending priority order.",
+        "virtual_table": "bo_new/b4.1.tpl"
+    },
+    {
+        "instance_id": "b5",
+        "name": "LOCAL_SUPPLIER_VOLUME",
+        "ref_id": "q5",
+        "business_abstraction": "The LOCAL_SUPPLIER_VOLUME lists the revenue volume done through local suppliers. It lists for each nation in a region(args:r_name) the revenue volume that resulted from lineitem transactions in which the customer ordering parts and the supplier filling them were both within that nation. The query lists the nations and revenue volume in descending order by revenue. Revenue volume for all qualifying lineitems in a particular nation is defined as sum(l_extendedprice * (1 - l_discount)).",
+        "virtual_table": "bo_new/b5.tpl"
+    },
+    {
+        "instance_id": "b5.1",
+        "requires": "b5",
+        "name": "LOCAL_SUPPLIER_VOLUME_1YEAR",
+        "ref_id": "q5",
+        "business_abstraction": "The LOCAL_SUPPLIER_VOLUME_1YEAR lists the revenue volume done through local suppliers. It lists for each nation in a region(args:r_name) the revenue volume that resulted from lineitem transactions in which the customer ordering parts and the supplier filling them were both within that nation. The query is run in order to determine whether to institute local distribution centers in a given region. The query considers only parts ordered in a given year(args:date). The query displays the nations and revenue volume in descending order by revenue. Revenue volume for all qualifying lineitems in a particular nation is defined as sum(l_extendedprice * (1 - l_discount)).",
+        "virtual_table": "bo_new/b5.1.tpl"
+    },
+    {
+        "instance_id": "b6",
+        "name": "FORECASTING_REVENUE_CHANGE",
+        "ref_id": "q6",
+        "business_abstraction": "The FORECASTING_REVENUE_CHANGE considers all the lineitems shipped with discount is between discounts(args:discount). The query lists the amount by which the total revenue would have increased if these discounts had been eliminated for lineitems with l_quantity less than quantity(args:quantity). Note that the potential revenue increase is equal to the sum of [l_extendedprice * l_discount] for all lineitems with discounts and quantities in the qualifying range.",
+        "virtual_table": "bo_new/b6.tpl"
+    },
+    {
+        "instance_id": "b6.1",
+        "requires": "b6",
+        "name": "FORECASTING_REVENUE_CHANGE_1YEAR",
+        "ref_id": "q6",
+        "business_abstraction": "The FORECASTING_REVENUE_CHANGE_1YEAR quantifies the amount of revenue increase that would have resulted from eliminating certain companywide discounts in a given percentage range in a given year. Asking this type of \"what if\" query can be used to look for ways to increase revenues. It considers all the lineitems shipped in a given year(args:date) with discount between discounts(args:discount). The query lists the amount by which the total revenue would have increased if these discounts had been eliminated for lineitems with l_quantity less than quantity(args:quantity). Note that the potential revenue increase is equal to the sum of [l_extendedprice * l_discount] for all lineitems with discounts and quantities in the qualifying range.",
+        "virtual_table": "bo_new/b6.1.tpl"
+    },
+    {
+        "instance_id": "b7",
+        "name": "SUPP_CUST_VOLUME_SHIPPING",
+        "ref_id": "q7",
+        "business_abstraction": "The SUPP_CUST_VOLUME_SHIPPING finds the volumes, which are defined as gross discounted revenues derived from lineitems for two given nations(args:n_name1, args:n_name2), in which parts were shipped from a supplier in either nation to a customer in the other nation between two dates(args:year1 and args:year2). The volume revenues are defined as l_extendedprice * (1 - l_discount).",
+        "virtual_table": "bo_new/b7.tpl"
+    },
+    {
+        "instance_id": "b7.1",
+        "requires": "b7",
+        "name": "SUPP_CUST_VOLUME_SHIPPING_BY_YEAR",
+        "ref_id": "q7",
+        "business_abstraction": "The SUPP_CUST_VOLUME_SHIPPING_BY_YEAR aggregated by year determines the value of goods shipped between certain nations to help in the re-negotiation of shipping contracts. It finds, for two given nations(args:n_name1, args:n_name2), the gross discounted revenues derived from lineitems in which parts were shipped from a supplier in either nation to a customer in the other nation between two dates(args:year1 and args:year2). The query lists the supplier nation, the customer nation, the year, and the revenue from shipments that took place in that year. The query orders the answer by Supplier nation, Customer nation, and year (all ascending)",
+        "virtual_table": "bo_new/b7.1.tpl"
+    },
+    {
+        "instance_id": "b8",
+        "name": "ORDERDATE_NATION_VOLUME",
+        "ref_id": "q8",
+        "business_abstraction": "The ORDERDATE_NATION_VOLUME by order date finds volume (which is also called discounted price, defined as l_extendedprice * (1 - l_discount)) between two dates(args:date1 and args:date2), given a region name(args:r_name), part type(args:p_type) for each nation and year.",
+        "virtual_table": "bo_new/b8.tpl"
+    },
+    {
+        "instance_id": "b8.1",
+        "requires": "b8",
+        "name": "NATION_MKTSHARE_BY_ORDERYEAR_FOR_REGION",
+        "ref_id": "q8",
+        "business_abstraction": "The NATION_MKTSHARE_BY_ORDERYEAR_FOR_REGION determines how the market share of all nation a given region(args:r_name) has changed over years(args:date1 and args:date2) for a given part type(args:p_type). The market share for each nation within a given region(args:r_name) is defined as the fraction of the revenue, the sum of the volume(l_extendedprice * (1-l_discount)), from the products of a specified type in that region that was supplied by suppliers.",
+        "virtual_table": "bo_new/b8.1.tpl"
+    },
+    {
+        "instance_id": "b9",
+        "name": "PRODUCT_TYPE_PROFIT_AMOUNT_BY_ORDERDATE",
+        "ref_id": "q9",
+        "business_abstraction": "The PRODUCT_TYPE_PROFIT_AMOUNT_BY_ORDERDATE gets the profit values of each nation by orderdate given a line of part that contains a specified substring in their names(args:p_name). The profit is defined as the sum of (l_extendedprice*(1-l_discount)) - (ps_supplycost * l_quantity)",
+        "virtual_table": "bo_new/b9.tpl"
+    },
+    {
+        "instance_id": "b9.1",
+        "requires": "b9",
+        "name": "PRODUCT_TYPE_PROFIT_MEASURE_BY_YEAR",
+        "ref_id": "q9",
+        "business_abstraction": "The PRODUCT_TYPE_PROFIT_MEASURE_BY_YEAR determines how much profit is made on a given line of parts, broken out by supplier nation and year. It finds, for each nation and each year, the profit for all parts ordered in that year that contain a specified substring in their names(args:p_name) and that were filled by a supplier in that nation. The profit is defined as the sum of (l_extendedprice*(1-l_discount)) - (ps_supplycost * l_quantity) for all lineitems describing parts in the specified line. The query lists the nations in ascending alphabetical order and, for each nation, the year and profit in descending order by year (most recent first).",
+        "virtual_table": "bo_new/b9.1.tpl"
+    },
+    {
+        "instance_id": "b10",
+        "name": "RETURNED_ITEM_CUSTOMERS",
+        "ref_id": "q10",
+        "business_abstraction": "The RETURNED_ITEM_CUSTOMERS identifies customers who might be having problems with the parts that are shipped to them. It finds the customers, in terms of their effect on lost revenue who have returned parts. The query lists the customer's name, address, nation, phone number, account balance, comment information and revenue lost. The customers are listed in descending order of lost revenue. Revenue lost is defined as sum(l_extendedprice*(1-l_discount)) for all qualifying lineitems.",
+        "virtual_table": "bo_new/b10.tpl"
+    },
+    {
+        "instance_id": "b10.1",
+        "requires": "b10",
+        "name": "RETURNED_ITEM_REPORT_3MONTH",
+        "ref_id": "q10",
+        "business_abstraction": "The RETURNED_ITEM_REPORT_3MONTH identifies customers who might be having problems with the parts that are shipped to them. It finds the top 20 customers, in terms of their effect on lost revenue for a given quarter(args:date), who have returned parts. The query considers only parts that were ordered in the specified quarter. The query lists the customer's name, address, nation, phone number, account balance, comment information and revenue lost. The customers are listed in descending order of lost revenue. Revenue lost is defined as sum(l_extendedprice*(1-l_discount)) for all qualifying lineitems.",
+        "virtual_table": "bo_new/b10.1.tpl"
+    },
+    {
+        "instance_id": "b11",
+        "name": "AVAIL_SUPPLY_COST",
+        "ref_id": "q11",
+        "business_abstraction": "The AVAIL_SUPPLY_COST returns the avaliable total supply cost for a given nation(args:n_name), which is defined as sum(ps_supplycost * ps_availqty). If 0.0 < fraction(args:fraction) < 1.0, it returns the fraction of cost.",
+        "virtual_table": "bo_new/b11.tpl"
+    },
+    {
+        "instance_id": "b11.1",
+        "requires": "b11",
+        "name": "IMPORTANT_STOCK_IDENTIFICATION",
+        "ref_id": "q11",
+        "business_abstraction": "The IMPORTANT_STOCK_IDENTIFICATION finds the most important subset of suppliers' stock in a given nation(args:n_name). It finds, from scanning the available stock of suppliers in a given nation, all the parts that represent a significant percentage(args:fraction) (here is 0.0001) of the total value of all available parts. The query displays the part number and the value of those parts in descending order of value.",
+        "virtual_table": "bo_new/b11.1.tpl"
+    }
+]

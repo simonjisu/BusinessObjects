@@ -1,0 +1,149 @@
+[
+    {
+        "instance_id": "q1",
+        "ref_id": "q1",
+        "question": "What is the summary pricing report for all line items that were shipped before 1993-01-01",
+        "hints": "",
+        "gold_sql": "gold_new/q1.sql"
+    },
+    {
+        "instance_id": "q2",
+        "ref_id": "q2",
+        "question": "Find top 100 highest account balance suppliers that I can place an order for parts made of COPPER, sized 42, with the lowest supply cost in EUROPE.",
+        "hints": "",
+        "gold_sql": "gold_new/q2.sql"
+    },
+    {
+        "instance_id": "q3",
+        "ref_id": "q3",
+        "question": "Show me top 10 unshipped orders by value as of 1995-03-20 in the HOUSEHOLD market segment?",
+        "hints": "",
+        "gold_sql": "gold_new/q3.sql"
+    },
+    {
+        "instance_id": "q4",
+        "ref_id": "q4",
+        "question": "Count me the number of late-delivery orders in the first quarter of 1993.",
+        "hints": "",
+        "gold_sql": "gold_new/q4.sql"
+    },
+    {
+        "instance_id": "q5",
+        "ref_id": "q5",
+        "question": "What was the revenue volume from local supplier transactions for each nation in the EUROPE region for the year 1993?",
+        "hints": "",
+        "gold_sql": "gold_new/q5.sql"
+    },
+    {
+        "instance_id": "q6",
+        "ref_id": "q6",
+        "question": "What would have been the total revenue increase in year 1993 if we had eliminated discounts between 0.01 and 0.03 for line items with quantities below 24?",
+        "hints": "",
+        "gold_sql": "gold_new/q6.sql"
+    },
+    {
+        "instance_id": "q7",
+        "ref_id": "q7",
+        "question": "How much gross discounted revenue for shipments between ALGERIA and GERMANY in the years 1995 and 1996?",
+        "hints": "",
+        "gold_sql": "gold_new/q7.sql"
+    },
+    {
+        "instance_id": "q8",
+        "ref_id": "q8",
+        "question": "How was the market share of INDONESIA in the ASIA region for the part type ECONOMY ANODIZED STEEL in 1995?",
+        "hints": "",
+        "gold_sql": "gold_new/q8.sql"
+    },
+    {
+        "instance_id": "q9",
+        "ref_id": "q9",
+        "question": "Can you show the profit margins for the part type ECONOMY ANODIZED STEEL?",
+        "hints": "",
+        "gold_sql": "gold_new/q9.sql"
+    },
+    {
+        "instance_id": "q10",
+        "ref_id": "q10",
+        "question": "Find top 20 customers by lost revenue due to returned parts in the quarter starting on 1993-07-01.",
+        "hints": "",
+        "gold_sql": "gold_new/q10.sql"
+    },
+    {
+        "instance_id": "q11",
+        "ref_id": "q11",
+        "question": "Can you show me the top parts by value from suppliers in VIETNAM? List top 10 of them.",
+        "hints": "",
+        "gold_sql": "gold_new/q11.sql"
+    },
+    {
+        "instance_id": "q12",
+        "ref_id": "q12",
+        "question": "How many late line items were received by customers in 1993?",
+        "hints": "",
+        "gold_sql": "gold_new/q12.sql"
+    },
+    {
+        "instance_id": "q13",
+        "ref_id": "q13",
+        "question": "Can you provide the distribution of customers based on the number of orders they have made, including those with no orders at all?",
+        "hints": "",
+        "gold_sql": "gold_new/q13.sql"
+    },
+    {
+        "instance_id": "q14",
+        "ref_id": "q14",
+        "question": "What percentage of the total revenue came from parts with type like PROMO shipped during 1 month from 1993-09-01?",
+        "hints": "",
+        "gold_sql": "gold_new/q14.sql"
+    },
+    {
+        "instance_id": "q15",
+        "ref_id": "q15",
+        "question": "Who was the top overall revenue supplier for parts shipped during the quarter starting on 1993-03-01.",
+        "hints": "",
+        "gold_sql": "gold_new/q15.sql"
+    },
+    {
+        "instance_id": "q16",
+        "ref_id": "q16",
+        "question": "How many suppliers can provide parts of size 49?",
+        "hints": "",
+        "gold_sql": "gold_new/q16.sql"
+    },
+    {
+        "instance_id": "q17",
+        "ref_id": "q17",
+        "question": "How much yearly gross undiscounted revenue for parts of Brand#23?",
+        "hints": "",
+        "gold_sql": "gold_new/q17.sql"
+    },
+    {
+        "instance_id": "q18",
+        "ref_id": "q18",
+        "question": "How many customers have ever placed large volume orders with a total quantity above 300?",
+        "hints": "",
+        "gold_sql": "gold_new/q18.sql"
+    },
+    {
+        "instance_id": "q19",
+        "ref_id": "q19",
+        "question": "What is the total discounted revenue for orders shipped by air and for parts of Brand#12?",
+        "hints": "",
+        "gold_sql": "gold_new/q19.sql"
+    },
+    {
+        "instance_id": "q20",
+        "ref_id": "q20",
+        "question": "How many suppliers have an excess of more than 50% of a specific part they shipped in 1993 for CANADA?",
+        "hints": "",
+        "gold_sql": "gold_new/q20.sql"
+    },
+    {
+        "instance_id": "q21",
+        "ref_id": "q21",
+        "question": "Which suppliers from GERMANY who failed to meet the committed delivery date? List top 100 of supplier names and the number of late delivery.",
+        "hints": "",
+        "gold_sql": "gold_new/q21.sql"
+    }
+]
