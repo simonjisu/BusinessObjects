@@ -434,7 +434,7 @@ if __name__ == '__main__':
     elif args.task == 'valid_bo':
         # valid_bo
         paths = list(prediction_path.glob(f'{args.ds}_{args.type}_*.jsonl'))
-
+        print(f'Found {len(paths)} files')
         # get target_parsed_sql
         file_name = f'{args.ds}_{args.type}_parsed.pkl'
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
