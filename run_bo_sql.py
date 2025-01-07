@@ -239,6 +239,7 @@ def valid_bo(
             res = {
                 'sample_id': sample.sample_id,
                 'gold_sql': sample.final.sql,
+                'question': sample.final.question,
                 'retrieved': bo['sample_id'],
             }
             question = sample.final.question
