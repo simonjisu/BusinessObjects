@@ -220,7 +220,7 @@ def get_pred_results_valid_bo(
 
     processed_files = [p.stem for p in eval_path.glob(f'{file_name}_*.json')]
     if processed_files:
-        paths = dict([x for x in paths if x.stem not in processed_files])
+        paths = [x for x in paths if x.stem not in processed_files]
         print(f'Skip some processed files: {len(processed_files)} {processed_files[-5:]}')
 
     pred_res = defaultdict(dict)  # db_id -> train_bo -> list[dict]
