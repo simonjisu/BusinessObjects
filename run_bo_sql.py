@@ -1,37 +1,111 @@
 import json
-import pickle
+import numpy as np
 import pandas as pd
 import argparse
-import sqlparse
+import sqlglot
 from tqdm import tqdm
 from pathlib import Path
-from typing import Optional
+from collections import defaultdict
+from itertools import product
 
 from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
 from langchain_core.runnables import RunnableSequence
 from langchain_community.vectorstores import FAISS
-from langchain_community.vectorstores.utils import DistanceStrategy
 from langchain_openai.embeddings import OpenAIEmbeddings
 from langchain_core.retrievers import BaseRetriever
 from langchain_core.prompts import PromptTemplate
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CrossEncoderReranker
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+from langchain_community.callbacks.manager import get_openai_callback
 
 from src.prompts import Prompts
 from src.pymodels import SQLResponse, DatabaseModel, BirdSample, SpiderSample, BODescription
 from src.db_utils import get_schema_str
 from src.data_preprocess import process_all_tables, load_raw_data, load_samples_spider_bird
 from src.database import SqliteDatabase
-from src.eval import result_eq, check_if_exists_orderby
 from src.parsing_sql import (
     Schema, extract_all, extract_aliases, _format_expression
 )
-from collections import defaultdict
-import sqlglot
+from src.eval_utils import get_complexity
+
 _ = load_dotenv(find_dotenv())
+
+from typing import Iterator
+from itertools import product, islice
+
+def batched(iterable, n, *, strict=False):
+    # batched('ABCDEFG', 3) → ABC DEF G
+    if n < 1:
+        raise ValueError('n must be at least one')
+    iterator = iter(iterable)
+    while batch := tuple(islice(iterator, n)):
+        if strict and len(batch) != n:
+            raise ValueError('batched(): incomplete batch')
+        yield batch
+
+class Sampler():
+    def __init__(self, bos: dict[str, list[dict]]):
+        self.bos = bos
+        self.df = _get_df_from_bos(bos)
+
+    def _get_sample_batch(self, db_id: str, n_sample: int=1, n_stop: int=20, seed: int=42):
+        np.random.seed(seed)
+        sampled = []
+        sample_batch = []
+        n_sampled = 0
+        df_db_id = self.df.loc[(self.df['db_id'] == db_id) & ~self.df['sample_id'].isin(sampled)]
+        while df_db_id['category'].nunique() > 0 and n_sampled < n_stop:
+            groupby_statement = df_db_id.groupby('category')['sample_id']
+            sample_ids = groupby_statement.apply(lambda x: x.sample(min(len(x), n_sample))).tolist()
+            if n_sampled + len(sample_ids) > n_stop:
+                sample_ids = sample_ids[:(n_stop - n_sampled)]
+            sampled.extend(sample_ids)
+            sample_batch.append(sample_ids)
+            n_sampled += len(sample_ids)
+            df_db_id = self.df.loc[(self.df['db_id'] == db_id) & ~self.df['sample_id'].isin(sampled)]
+
+        return sample_batch
+    
+    def sample(self, db_id: str, n_sample: int=1, n_stop: int=20, seed: int=42, rt_idx: bool=False) -> Iterator:
+        sample_batch = self._get_sample_batch(db_id, n_sample, n_stop, seed)
+        if rt_idx:
+            for sample_ids in sample_batch:
+                yield sample_ids
+        else:
+            for sample_ids in sample_batch:
+                s = self.df.loc[(self.df['db_id'] == db_id) & self.df['sample_id'].isin(sample_ids)]
+                s = s.to_dict(orient='records')
+                for x in s:
+                    x['category'] = str(x['category'])
+                yield s
+
+def _format_interval(x: pd.Interval):
+    return pd.Interval(
+        left=int(np.floor(x.left)), 
+        right=int(np.floor(x.right)),
+        closed=x.closed
+    )
+
+def _get_categories(s: pd.Series):
+    tiles = [0, 0.2, 0.4, 0.6, 0.8, 1]
+    df = pd.qcut(s, q=tiles, duplicates='drop')
+    return df
+
+def _get_df_from_bos(bos):
+    df = []
+    for db_id, bs in bos.items():
+        for b in bs:
+            res = {'db_id': db_id}
+            res.update(b)
+            df.append(res)
+    df = pd.DataFrame(df)
+    df_cates = df.groupby('db_id')['gold_complexity'].apply(_get_categories)
+    df_cates = df_cates.rename('category').apply(_format_interval)
+    df = df.merge(df_cates.reset_index('db_id', drop=True), left_index=True, right_index=True)
+    return df
 
 def create_vt_ba(
         samples: list[SpiderSample|BirdSample], 
@@ -56,14 +130,21 @@ def create_vt_ba(
         for sample in tqdm(samples, total=len(samples), desc=f"{db_id}"):
             bo = {
                 'sample_id': sample.sample_id,
+                'gold_sql': sample.final.sql,
             }
+            # get complexity
             schema = Schema(tables[db_id].db_schema)
+            output = extract_all(sample.final.sql, schema)
+            bo['gold_complexity'] = get_complexity(output)
+
+            # get virtual table
             parsed_sql = sqlglot.parse_one(sample.final.sql)
             aliases = extract_aliases(parsed_sql)
             _, expr = _format_expression(parsed_sql, aliases, schema, 
                                         remove_alias=False, anonymize_literal=True)
             bo['vt'] = str(expr)
             
+            # get description
             db_schema = get_schema_str(
                 schema=tables[db_id].db_schema, 
                 foreign_keys=tables[db_id].foreign_keys,
@@ -78,10 +159,6 @@ def create_vt_ba(
         with (prediction_path / f'{file_name}_{db_id}.json').open('w') as f:
             json.dump(results, f, indent=4)
 
-def filter_by_pm_score(x: pd.Series, df_pm_stats: pd.DataFrame, percentile: int):
-    rank_criteria = df_pm_stats.loc[x['db_id'], f'{percentile}%']
-    return x['pm_score_rank'] < rank_criteria
-
 def get_vector_store(bos: dict[str, list[dict[str, str]]]):
     documents = []
     for db_id, samples in bos.items():
@@ -95,18 +172,18 @@ def get_vector_store(bos: dict[str, list[dict[str, str]]]):
                 }
             )
             documents.append(doc)
-
     embeddings_model = OpenAIEmbeddings()
-    vectorstore = FAISS.from_documents(
+    vector_store = FAISS.from_documents(
         documents, 
         embedding = embeddings_model,
     )
-    return vectorstore
+    return vector_store
 
 def get_retriever(
         vectorstore: FAISS,
         cross_encoder: HuggingFaceCrossEncoder,
         db_id: str,
+        sample_ids: list[int],
         n_retrieval: int = 3,
         k_retrieval: int = 10,
         score_threshold: float = 0.60,
@@ -115,9 +192,11 @@ def get_retriever(
     k_retrieval = k_retrieval if use_reranker else n_retrieval
     base_retriever = vectorstore.as_retriever(
         search_type='similarity_score_threshold',
-        search_kwargs={'k': k_retrieval, 
-                       'score_threshold': score_threshold, 
-                       'filter': {'db_id': db_id}}
+        search_kwargs={
+            'k': k_retrieval, 
+            'score_threshold': score_threshold, 
+            'filter': {'db_id': db_id, 'sample_id': {'$in' : sample_ids}},
+        }
     )
     if use_reranker:
         compressor = CrossEncoderReranker(model=cross_encoder, top_n=n_retrieval)
@@ -128,34 +207,90 @@ def get_retriever(
         retriever = base_retriever
     return retriever
 
-def predict_sql_bo(
-        to_pred_samples: list[SpiderSample|BirdSample],
+def valid_bo(
+        samples: list[SpiderSample|BirdSample],
         tables: dict[DatabaseModel],
-        vectorstore: FAISS,
+        bos: dict[str, list[dict[str, str]]],
         chain: RunnableSequence,
         prediction_path: Path,
         file_name: str = '[args.ds]_[args.type]',
         split_k: int = 2,
-        k_retrieval: int = 10,
-        n_retrieval: int = 3,
+    ):
+    # "[file_name]_[db_id]-[idx_bo]"
+    # restart from checkpoint
+    processed_files = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
+    if processed_files:
+        bos = [x for x in bos.items() if x[0] not in processed_files]
+        print(f'Skip some processed db_ids: {len(processed_files)} {processed_files[-5:]}')
+
+    for detail_file_name, train_bos in bos.items():
+        train_bos = train_bos['train_bos']
+        db_id = detail_file_name.split('-')[0]
+        schema_str = get_schema_str(
+            schema=tables[db_id].db_schema, 
+            foreign_keys=tables[db_id].foreign_keys,
+            col_explanation=tables[db_id].col_explanation
+        )
+        results = []
+        x_samples = list(filter(lambda x: x.db_id == db_id, samples))
+        iterator = list(product(train_bos, x_samples))
+        iterator = tqdm(iterator, total=len(iterator), desc=f"{detail_file_name}")
+        for bo, sample in iterator:
+            res = {
+                'sample_id': sample.sample_id,
+                'gold_sql': sample.final.sql,
+                'retrieved': bo['sample_id'],
+            }
+            question = sample.final.question
+            hint = '\nDescriptions and Virtual Tables:\n'
+            hint += json.dumps({'description': bo['ba'], 'virtual_table': bo['vt']}, indent=4)
+            hint += '\n'
+            input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
+            with get_openai_callback() as cb:
+                output = chain.invoke(input=input_data)
+
+            res.update({
+                'rationale': output.rationale,
+                'pred_sql': output.full_sql_query,
+                'token_usage': {'tokens': cb.total_tokens, 'cost': cb.total_cost}
+            })
+            results.append(res)
+
+        with open(prediction_path / f'{file_name}_{detail_file_name}.json', 'w') as f:
+            json.dump(results, f, indent=4)
+
+def predict_sql_bo(
+        samples: list[SpiderSample|BirdSample],
+        tables: dict[DatabaseModel],
+        bos: dict[str, dict[str, list[str]|int]],
+        chain: RunnableSequence,
+        prediction_path: Path,
+        file_name: str = '[args.ds]_[args.type]',
+        split_k: int = 2,
+        k_retrieval: int = 5,  # for test
+        n_retrieval: int = 1,   # for test
         score_threshold: float = 0.65,
         use_reranker: bool = True
     ):
     processed_db_ids = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
     # restart from checkpoint
     if processed_db_ids:
-        to_pred_samples = [sample for sample in to_pred_samples if sample.db_id not in processed_db_ids]
+        samples = [sample for sample in samples if sample.db_id not in processed_db_ids]
         print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}')
 
     samples_by_db_id = defaultdict(list)
-    for sample in to_pred_samples:
+    for sample in samples:
         samples_by_db_id[sample.db_id].append(sample)
 
     if use_reranker:
         cross_encoder = HuggingFaceCrossEncoder(model='cross-encoder/ms-marco-MiniLM-L-6-v2')
     else:
         cross_encoder = None
+
+
+    # use train set to evaluate development set
     for db_id, samples in samples_by_db_id.items():
+        vectorstore = get_vector_store(bos)
         retriever = get_retriever(
             vectorstore, cross_encoder, db_id, 
             n_retrieval, k_retrieval, score_threshold, use_reranker
@@ -173,15 +308,18 @@ def predict_sql_bo(
             hint += json.dumps({j: {'description': doc.page_content, 'virtual_table': doc.metadata['vt']} for j, doc in enumerate(docs)}, indent=4)
             hint += '\n'
             input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
-            output = chain.invoke(input=input_data)
+    
+            with get_openai_callback() as cb:
+                output = chain.invoke(input=input_data)
             
-            full_sql_output = {}
-            full_sql_output['sample_id'] = sample.sample_id
-            full_sql_output['rationale'] = output.rationale
-            full_sql_output['pred_sql'] = output.full_sql_query
-            full_sql_output['retrieved'] = [doc.metadata['sample_id'] for doc in docs]
+            res = {}
+            res['sample_id'] = sample.sample_id
+            res['rationale'] = output.rationale
+            res['pred_sql'] = output.full_sql_query
+            res['retrieved'] = [doc.metadata['sample_id'] for doc in docs]
+            res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
             # full_sql_output = 1
-            results.append(full_sql_output)
+            results.append(res)
 
         with open(prediction_path / f'{file_name}_{db_id}.json', 'w') as f:
             json.dump(results, f, indent=4)
@@ -194,9 +332,12 @@ if __name__ == '__main__':
     parser.add_argument('--description_file', type=str, default='description.json', help='File containing the descriptions.')
     parser.add_argument('--k_retrieval', type=int, default=5, help='Number of retrievals for reranker to consider')
     parser.add_argument('--n_retrieval', type=int, default=1, help='Number of retrievals to consider')
+    parser.add_argument('--n_sample', type=int, default=3, help='[type=dev] Number of samples to consider')
+    parser.add_argument('--n_stop', type=int, default=50, help='[type=dev] Number of samples to stop')
     parser.add_argument('--score_threshold', type=float, default=0.60, help='Score threshold for retrieval')
     parser.add_argument('--use_reranker', action='store_true', help='Whether to use reranker or not')
-    # parser.add_argument('--percentile', type=int, default=50, help='Percentile to filter by: 25, 50, 75, any other will not call this filter')
+    
+    parser.add_argument('--db_id_group', type=int, default=-1, help='Group of db_ids to consider, < 0 means use all')
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -215,6 +356,12 @@ if __name__ == '__main__':
         all_descriptions = json.load(f)
     tables = process_all_tables(tables, descriptions=all_descriptions)
 
+    model_openai = ChatOpenAI(
+        model='gpt-4o-mini',
+        temperature=0.0,
+        frequency_penalty=0.1,
+    )
+
     if args.task == 'create_bo':
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
 
@@ -222,11 +369,7 @@ if __name__ == '__main__':
             template=Prompts.bo_description,
             input_variables=['schema', 'virtual_table']
         )
-        model_openai = ChatOpenAI(
-            model='gpt-4o-mini',
-            temperature=0.0,
-            frequency_penalty=0.1,
-        )
+        
         model = model_openai.with_structured_output(BODescription)
         chain = (prompt | model)
 
@@ -243,33 +386,107 @@ if __name__ == '__main__':
         with (prediction_path / f'final_{args.ds}_{args.type}_bo.json').open('w') as f:
             json.dump(bos, f, indent=4)
 
-    elif args.task == 'zero_shot_hint':
-        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-        print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
-        # load bos
-        with (prediction_path / f'final_{args.ds}_{args.type}_bo.json').open() as f:
+    elif args.task == 'valid_bo_prepare_batch_run':
+        dev_samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
+            partial_db_ids = json.load(f)
+        
+        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+        assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+        with bo_path.open() as f:
             bos = json.load(f)
 
-        vectorstore = get_vector_store(bos)
+        db_ids = list(bos.keys())
+        partial_db_ids = {}
+        n = 20
+        for i in range(30):
+            if db_ids[i*n:(i+1)*n]:
+                partial_db_ids[i] = db_ids[i*n:(i+1)*n]
 
+        with open(experiment_folder / f'partial_{args.ds}_db_ids.json', 'w') as f:
+            json.dump(partial_db_ids, f, indent=4)
+        
+        sampler = Sampler(bos)
+        
+        sampled_bos = {}
+        for db_id_group in partial_db_ids:
+            sampled_bos[str(db_id_group)] = defaultdict()
+            for db_id in partial_db_ids[str(db_id_group)]:
+                x_samples = list(filter(lambda x: x.db_id == db_id, dev_samples))
+                for idx_bos, train_bos in enumerate(sampler.sample(db_id, args.n_sample, args.n_stop, rt_idx=False)):
+                    # print(f'{db_id}-{idx_bos} :', f'{len(train_bos)}', f'{len(list(product(train_bos, x_samples)))}')
+                    sampled_bos[str(db_id_group)][f'{db_id}-{idx_bos}'] = {
+                        'train_bos': train_bos,
+                        'n_iter': len(list(product(train_bos, x_samples))), 
+                        'total_bos_in_batch': len(train_bos),
+                        'total_samples_in_batch': len(x_samples)
+                    }
+
+        with (experiment_folder / f'partial_{args.ds}_batch.json').open('w') as f:
+            json.dump(sampled_bos, f, indent=4)
+
+    elif args.task == 'valid_bo':
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        
+        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+        assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+        with bo_path.open() as f:
+            bos = json.load(f)
+
+        batch_file_path = experiment_folder / f'partial_{args.ds}_batch.json'
+        # assert batch_file_path.exists(), 'Run with the `task=create_bo, type=train` first'
+        if (args.db_id_group >= 0) and batch_file_path.exists():
+            with batch_file_path.open() as f:
+                sampled_bos = json.load(f)[str(args.db_id_group)]  
+            # dict["db_id-idx_bo", dict["train_bos", "n_iter", "total_bos_in_batch", "total_samples_in_batch"]]
+        else:
+            raise KeyError('Run with the `task=valid_bo_prepare_batch_run` first')
+        
+        # filter samples with db_ids gorup
+        with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
+            partial_db_ids = json.load(f)
+        samples = list(filter(lambda x: x.db_id in partial_db_ids[str(args.db_id_group)], samples))
+        print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
+        
         prompt = PromptTemplate(
             template=Prompts.zero_shot_hints_inference,
             input_variables=['schema', 'input_query', 'hint'],
         )
 
-        model_openai = ChatOpenAI(
-            model='gpt-4o-mini',
-            temperature=0.0,
-            frequency_penalty=0.1,
+        model = model_openai.with_structured_output(SQLResponse)
+        chain = (prompt | model)
+
+        valid_bo(
+            samples=samples, 
+            tables=tables, 
+            bos=sampled_bos, 
+            chain=chain,
+            prediction_path=prediction_path, 
+            file_name=f'{args.ds}_{args.type}', 
+            split_k=2,
+        )
+
+    elif args.task == 'zero_shot_hint':
+        bo_path = experiment_folder / 'predictions' / 'valid_bo' / f'final_{args.ds}_bo.json'
+        assert bo_path.exists(), f'Run with the `task=valid_bo, type=dev` first'
+        with bo_path.open() as f:
+            bos = json.load(f)
+
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
+        
+        prompt = PromptTemplate(
+            template=Prompts.zero_shot_hints_inference,
+            input_variables=['schema', 'input_query', 'hint'],
         )
 
         model = model_openai.with_structured_output(SQLResponse)
         chain = (prompt | model)
 
         predict_sql_bo(
-            to_pred_samples=samples, 
+            samples=samples, 
             tables=tables, 
-            vectorstore=vectorstore, 
+            bos=bos, 
             chain=chain,
             prediction_path=prediction_path, 
             file_name=f'{args.ds}_{args.type}', 

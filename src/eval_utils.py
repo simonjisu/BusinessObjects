@@ -365,19 +365,8 @@ def get_all_partial_score(
     return results, final_score  # structural, semantic, overall
 
 # ---------------- Complexity ---------------- 
-def normalize_values(x, min_value=0, max_value=6):
-    normalized = (x - min_value) / (max_value - min_value)
-    return normalized
 
-def tanh(x: np.ndarray, k: float):
-    normalized = normalize_values(x, max_value=k)
-    return np.tanh(np.log(1+normalized.sum()))
-
-def derive_complexity(x: list[int], k=6):
-    complexity = tanh(np.array(x), k)
-    return complexity
-
-def get_complexity(output, k=6):
+def get_complexity(output):
     args1 = [('sel', 'sel_asts'), ('cond_asts', 'op_types'), ('agg', 'agg_asts'), ('orderby', 'orderby_asts')]
     args2 = ['distinct', 'limit', 'nested', 'table_asts']
     total_complexity = []
@@ -385,19 +374,19 @@ def get_complexity(output, k=6):
         exists = all([output[arg[0]], output[arg[1]]])
         if exists:
             x = [len(output[arg[0]]), len(output[arg[1]])]
-            complexity = derive_complexity(x, k=k)
+            complexity = np.sum(x)
             total_complexity.append(complexity)
     
     for arg in args2:
         if output[arg]:
             if arg == 'nested':
-                complexity = derive_complexity([output[arg]], k=k)
+                complexity = output[arg]
             elif arg == 'table_asts':
-                complexity = derive_complexity([len(output[arg])], k=k)
+                complexity = len(output[arg])
             else:
-                complexity = derive_complexity([int(output[arg])], k=k)
+                complexity = int(output[arg])
             total_complexity.append(complexity)
-    return np.mean(total_complexity)
+    return int(sum(total_complexity))
 
 # ------------------------------ Eval execution results ------------------------------
 # Source: https://github.com/taoyds/spider/blob/master/evaluation.py

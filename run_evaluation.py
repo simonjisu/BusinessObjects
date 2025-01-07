@@ -127,7 +127,7 @@ def get_pred_results(
             # Evaluate Structural and Semantic score
             sample_id = pred['sample_id']
             target_parsed_output = target_parsed[db_id][sample_id]
-            gold_complexity = get_complexity(target_parsed_output, k=3 if ds == 'bird' else 6)
+            gold_complexity = get_complexity(target_parsed_output)
 
             pred_parsed_output = pred_parsed[db_id][sample_id]
             if pred_parsed_output is None:
@@ -205,10 +205,8 @@ def get_pred_results(
                 }
             )
 
-        # TODO: remane it as jsonl
         with open(eval_path / f'{file_name}_{db_id}.json', 'w') as f:
-            for res in output_results:
-                f.write(json.dumps(res) + '\n')
+            json.dump(output_results, f, indent=4)
 
     with open(proj_path / 'experiments' / ds / 'evals' / f'{file_name}_error_infos.json', 'w') as f:
         json.dump(error_infos, f, indent=4)
@@ -291,7 +289,6 @@ if __name__ == '__main__':
     df = []
     for p in eval_path.glob(f'{args.ds}_{args.type}_*.json'):
         with p.open() as f:
-            for line in f:
-                eval_data = json.loads(line)
-                df.append(eval_data)
+            eval_data = json.load(f)
+        df.extend(eval_data)
     pd.DataFrame(df).to_csv(eval_path / f'{args.ds}_{args.type}.csv', index=False)

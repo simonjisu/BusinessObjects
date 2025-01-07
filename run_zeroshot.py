@@ -10,6 +10,7 @@ from langchain_core.prompts import PromptTemplate
 # Models
 from langchain_openai import ChatOpenAI
 from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_community.callbacks.manager import get_openai_callback
 
 from src.pymodels import SQLResponse, SpiderSample, BirdSample, DatabaseModel
 from src.prompts import Prompts
@@ -58,10 +59,13 @@ def predict_sql(
                 col_explanation=tables[sample.db_id].col_explanation
             )
             input_data = {'schema': db_schema, 'input_query': sample.final.question}
-            output = chain.invoke(input=input_data)
+            
+            with get_openai_callback() as cb:
+                output = chain.invoke(input=input_data)
 
             res['rationale'] = output.rationale
             res['pred_sql'] = output.full_sql_query
+            res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
             results.append(res)
         
         with (prediction_path / f'{file_name}_{db_id}.json').open('w') as f:
@@ -92,7 +96,6 @@ if __name__ == '__main__':
     parser.add_argument('--model', type=str, default='gpt-4o-mini', help='Model to use for training.')
     parser.add_argument('--task', type=str, default='zero_shot', help='`zero_shot` or `post_process` or `output_result_plus`')
     parser.add_argument('--seed', type=int, default=42, help='Random seed for reproducibility.')
-    parser.add_argument('--k', type=int, default=500, help='Number of samples to process at a time.')
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -110,7 +113,7 @@ if __name__ == '__main__':
     for p in [prediction_path, eval_path]:
         if not p.exists():
             p.mkdir(parents=True)
-
+    
     tables, *_ = load_raw_data(data_path, load_test=False)
 
     with (proj_path / 'data' / args.description_file).open() as f:
@@ -135,6 +138,7 @@ if __name__ == '__main__':
         chain = (prompt | model)
 
         # run zero-shot SQL generation
+        print(f'Start SQL generation {prediction_path}')
         predict_sql(samples, tables, chain, prediction_path, split_k=2,
                     file_name=f'{args.ds}_{args.type}')
         
