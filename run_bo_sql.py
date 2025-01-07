@@ -220,7 +220,7 @@ def valid_bo(
     # restart from checkpoint
     processed_files = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
     if processed_files:
-        bos = [x for x in bos.items() if x[0] not in processed_files]
+        bos = dict([x for x in bos.items() if x[0] not in processed_files])
         print(f'Skip some processed db_ids: {len(processed_files)} {processed_files[-5:]}')
 
     for detail_file_name, train_bos in bos.items():
