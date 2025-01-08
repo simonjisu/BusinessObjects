@@ -333,9 +333,9 @@ def get_pred_results_valid_bo(
                     'db_id': db_id,
                     'retrieved': train_bo_id,
                     'gold_complexity': gold_complexity,
-                    'structural_score': structural_scores[k],
-                    'semantic_score': semantic_scores[k],
-                    'f1_score': f1_scores[k],
+                    'structural_score': float(structural_scores[k]),
+                    'semantic_score': float(semantic_scores[k]),
+                    'f1_score': float(f1_scores[k]),
                     'exec_result': score,
                 }
             )
