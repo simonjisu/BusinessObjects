@@ -433,7 +433,7 @@ if __name__ == '__main__':
 
     elif args.task == 'valid_bo':
         # valid_bo
-        paths = list(prediction_path.glob(f'{args.ds}_{args.type}_*.json'))
+        paths = sorted(list(prediction_path.glob(f'{args.ds}_{args.type}_*.json')))
         print(f'Found {len(paths)} files')
         
         # get target_parsed_sql
