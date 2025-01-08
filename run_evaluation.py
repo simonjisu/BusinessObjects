@@ -141,6 +141,8 @@ def get_pred_results(
         iterator = tqdm(enumerate(preds), total=len(preds))
         for k, pred in iterator:
             iterator.set_description(f'{db_id} | pred_exec: {len(error_infos["pred_exec"])} | gold_exec: {len(error_infos["gold_exec"])} | python_script: {len(error_infos["python_script"])} | result: {len(error_infos["result"])}')
+            train_bo_id = pred['retrieved']  # list
+            
             # Evaluate Structural and Semantic score
             sample_id = pred['sample_id']
             target_parsed_output = target_parsed[db_id][sample_id]
@@ -200,10 +202,13 @@ def get_pred_results(
                 if score == 0 and error_info == '':
                     error_info = 'Result not equal'
                     error_infos['result'].append((db_id, sample_id))
+            
+            # add score to the list
             output_results.append(
                 {
                     'sample_id': sample_id, 
                     'db_id': db_id,
+                    'retrieved': train_bo_id,
                     'gold_complexity': gold_complexity,
                     'structural_score': float(structural_scores[k]),
                     'semantic_score': float(semantic_scores[k]),
@@ -239,8 +244,6 @@ def get_pred_results_valid_bo(
     if processed_files:
         paths = [x for x in paths if x.stem not in processed_files]
         print(f'Skip some processed files: {len(processed_files)} {processed_files[-5:]}')
-
-    pred_res = defaultdict(dict)  # db_id -> train_bo -> list[dict]
 
     for p in paths:
         output_results = []
@@ -294,9 +297,7 @@ def get_pred_results_valid_bo(
         iterator = tqdm(enumerate(preds), total=len(preds))
         for k, pred in iterator:
             iterator.set_description(f'{p.stem} | pred_exec: {len(error_infos["pred_exec"])} | gold_exec: {len(error_infos["gold_exec"])} | python_script: {len(error_infos["python_script"])} | result: {len(error_infos["result"])}')
-            train_bo_id = pred['retrieved']
-            if not pred_res[db_id].get(train_bo_id):
-                pred_res[db_id][train_bo_id] = []
+            train_bo_id = pred['retrieved']  # list
             
             # Evaluate Structural and Semantic score
             sample_id = pred['sample_id']
@@ -401,6 +402,7 @@ if __name__ == '__main__':
     if args.task in ('zero_shot', 'zero_shot_hint'):
         file_post_fix = f'{args.ds}_{args.type}' if args.scenario < 0 else f'{args.ds}_{args.type}_{args.scenario}'
         split_k = 2 if args.scenario < 0 else 3
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
         
         final_file = f'final_{file_post_fix}.json'
         if not (prediction_path / final_file).exists():
@@ -412,13 +414,20 @@ if __name__ == '__main__':
                     for r in results:
                         r.pop('rationale')
                         r['db_id'] = p.stem.split('_', split_k)[-1]
+
+                        found = False
+                        for s in samples:
+                            if r['sample_id'] == s.sample_id:
+                                found = True
+                        r['gold_sql'] = s.final.sql
+                        assert found, r['sample_id']
+
                     all_results.extend(results)
             with open(prediction_path / final_file, 'w') as f:
                 json.dump(all_results, f, indent=4)
 
         with open(prediction_path / final_file, 'r') as f:
             preds = json.load(f)
-        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
         # filter samples with db_id
         res_db_ids = {r['db_id'] for r in preds}
         print(f'Found {len(res_db_ids)} db_ids')
@@ -426,7 +435,7 @@ if __name__ == '__main__':
         samples = [s for s in samples if s.db_id in res_db_ids]
         
         # get target_parsed_sql
-        file_name = f'{args.ds}_{args.type}_parsed.pkl'  
+        file_name = f'{file_post_fix}_parsed.pkl'  
         if not (eval_path / file_name).exists():
             target_parsed, _ = get_target_parsed_sql(samples, tables)
             with open(eval_path / file_name, 'wb') as f:
@@ -436,7 +445,7 @@ if __name__ == '__main__':
             target_parsed = pickle.load(f)
 
         # get pred_parsed_sql 
-        file_name = f'{args.ds}_{args.type}_parsed_pred.pkl'
+        file_name = f'{file_post_fix}_parsed_pred.pkl'
         if not (eval_path / file_name).exists():
             pred_parsed, _ = get_prediction_parsed_sql(preds, tables)
             with open(eval_path / file_name, 'wb') as f:
