@@ -435,7 +435,7 @@ if __name__ == '__main__':
         pd.DataFrame(df).to_csv(eval_path / f'{args.ds}_{args.type}.csv', index=False)
 
     elif args.task == 'valid_bo':
-        filter_db_ids = ['bike_share_1', 'language_corpus']
+        filter_db_ids = ['bike_share_1', 'language_corpus', 'bird_dev_donor']
         # valid_bo
         paths = sorted(list(prediction_path.glob(f'{args.ds}_{args.type}_*.json')))
         paths = [p for p in paths if p.stem.split('_', 2)[-1].split('-')[0] not in filter_db_ids]
