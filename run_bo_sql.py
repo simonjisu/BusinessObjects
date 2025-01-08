@@ -388,7 +388,13 @@ if __name__ == '__main__':
             json.dump(bos, f, indent=4)
 
     elif args.task == 'valid_bo_prepare_batch_run':
-        dev_samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'bird_dev.csv')
+        df_score = df.loc[:, ['sample_id', 'db_id', 'exec_result']]
+        df_error = df_score.loc[df_score['exec_result'] == 0, ['db_id', 'sample_id']]
+        error_ids = df_error['sample_id'].tolist()
+        samples = list(filter(lambda x: x.sample_id in error_ids, samples))
+        
         with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
             partial_db_ids = json.load(f)
         
@@ -397,13 +403,7 @@ if __name__ == '__main__':
         with bo_path.open() as f:
             bos = json.load(f)
 
-        db_ids = list(bos.keys())
-        partial_db_ids = {}
-        n = 20
-        for i in range(30):
-            if db_ids[i*n:(i+1)*n]:
-                partial_db_ids[i] = db_ids[i*n:(i+1)*n]
-
+        
         with open(experiment_folder / f'partial_{args.ds}_db_ids.json', 'w') as f:
             json.dump(partial_db_ids, f, indent=4)
         
@@ -413,7 +413,7 @@ if __name__ == '__main__':
         for db_id_group in partial_db_ids:
             sampled_bos[str(db_id_group)] = defaultdict()
             for db_id in partial_db_ids[str(db_id_group)]:
-                x_samples = list(filter(lambda x: x.db_id == db_id, dev_samples))
+                x_samples = list(filter(lambda x: x.db_id == db_id, samples))
                 for idx_bos, train_bos in enumerate(sampler.sample(db_id, args.n_sample, args.n_stop, rt_idx=False)):
                     # print(f'{db_id}-{idx_bos} :', f'{len(train_bos)}', f'{len(list(product(train_bos, x_samples)))}')
                     sampled_bos[str(db_id_group)][f'{db_id}-{idx_bos}'] = {
@@ -427,8 +427,13 @@ if __name__ == '__main__':
             json.dump(sampled_bos, f, indent=4)
 
     elif args.task == 'valid_bo':
+        # use error sample to validate
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-        
+        df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'{args.ds}_dev.csv')
+        df_error = df.loc[df['exec_result'] == 0]
+        error_ids = df_error['sample_id'].tolist()
+        samples = list(filter(lambda x: x.sample_id in error_ids, samples))
+
         bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
         assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
         with bo_path.open() as f:
