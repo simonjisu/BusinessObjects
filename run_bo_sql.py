@@ -342,8 +342,9 @@ if __name__ == '__main__':
     parser.add_argument('--n_stop', type=int, default=50, help='[type=dev] Number of samples to stop')
     parser.add_argument('--score_threshold', type=float, default=0.60, help='Score threshold for retrieval')
     parser.add_argument('--use_reranker', action='store_true', help='Whether to use reranker or not')
-    
+    # valid_bo
     parser.add_argument('--db_id_group', type=int, default=-1, help='Group of db_ids to consider, < 0 means use all')
+    # test_bo
     parser.add_argument('--scenario', type=int, default='0', help='Scenario to consider')
     # scenario
     # (ba-query) 0: 10 | 1: 15 | 2: 25 | (question-query) 4: 25

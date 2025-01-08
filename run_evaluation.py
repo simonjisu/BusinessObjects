@@ -401,6 +401,7 @@ if __name__ == '__main__':
     if args.task in ('zero_shot', 'zero_shot_hint'):
         file_post_fix = f'{args.ds}_{args.type}' if args.scenario < 0 else f'{args.ds}_{args.type}_{args.scenario}'
         split_k = 2 if args.scenario < 0 else 3
+        
         final_file = f'final_{file_post_fix}.json'
         if not (prediction_path / final_file).exists():
             all_results = []
@@ -417,15 +418,19 @@ if __name__ == '__main__':
 
         with open(prediction_path / final_file, 'r') as f:
             preds = json.load(f)
-    
-        # get target_parsed_sql
-        file_name = f'{args.ds}_{args.type}_parsed.pkl'
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        # filter samples with db_id
+        res_db_ids = {r['db_id'] for r in preds}
+        print(f'Found {len(res_db_ids)} db_ids')
+        preds = [p for p in preds if p['db_id'] in res_db_ids]
+        samples = [s for s in samples if s.db_id in res_db_ids]
+        
+        # get target_parsed_sql
+        file_name = f'{args.ds}_{args.type}_parsed.pkl'  
         if not (eval_path / file_name).exists():
-            target_parsed, error_ids = get_target_parsed_sql(samples, tables)
+            target_parsed, _ = get_target_parsed_sql(samples, tables)
             with open(eval_path / file_name, 'wb') as f:
                 pickle.dump(target_parsed, f)
-            print(f'Error parsing target {args.ds}_{args.type}: {len(error_ids)}')
 
         with (eval_path / file_name).open('rb') as f:
             target_parsed = pickle.load(f)
@@ -433,13 +438,17 @@ if __name__ == '__main__':
         # get pred_parsed_sql 
         file_name = f'{args.ds}_{args.type}_parsed_pred.pkl'
         if not (eval_path / file_name).exists():
-            pred_parsed, error_ids = get_prediction_parsed_sql(preds, tables)
+            pred_parsed, _ = get_prediction_parsed_sql(preds, tables)
             with open(eval_path / file_name, 'wb') as f:
                 pickle.dump(pred_parsed, f)
-            print(f'Error parsing pred {args.ds}_{args.type}: {len(error_ids)}')
 
         with (eval_path / file_name).open('rb') as f:
             pred_parsed = pickle.load(f)
+
+        # filter samples with pred_parsed
+        error_ids = [sample_id for _, sample_id_ast in pred_parsed.items() for sample_id, ast in sample_id_ast.items() if not ast]
+        preds = [p for p in preds if p['sample_id'] not in error_ids]
+        samples = [s for s in samples if s.sample_id not in error_ids]
 
         get_pred_results(
             proj_path,
@@ -455,11 +464,11 @@ if __name__ == '__main__':
 
         # save it as dataframe
         df = []
-        for p in eval_path.glob(f'{args.ds}_{args.type}_*.json'):
+        for p in eval_path.glob(f'{file_post_fix}_*.json'):
             with p.open() as f:
                 eval_data = json.load(f)
             df.extend(eval_data)
-        pd.DataFrame(df).to_csv(eval_path / f'{args.ds}_{args.type}.csv', index=False)
+        pd.DataFrame(df).to_csv(eval_path / f'{file_post_fix}.csv', index=False)
 
     elif args.task == 'valid_bo':
         filter_db_ids = ['bike_share_1', 'language_corpus', 'donor', 'menu', 
