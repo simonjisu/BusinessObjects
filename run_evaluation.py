@@ -21,9 +21,10 @@ from src.eval_utils import (
 from src.data_preprocess import (
     load_raw_data, 
     process_all_tables,
-    load_samples_spider_bird,
-    
+    load_samples_spider_bird,   
 )
+from langchain.globals import set_llm_cache
+from langchain_community.cache import SQLiteCache
 
 def load_predictions(prediction_path: Path, filename: str):
     predictions = []
@@ -210,7 +211,7 @@ def get_pred_results_valid_bo(
         file_name: str='[args.ds]_[args.type]',
         ds: str = 'bird', # spider or bird,
     ) -> tuple[list[dict], dict[str, list]]:
-    
+
     error_infos = {
         'pred_exec': [],
         'gold_exec': [],

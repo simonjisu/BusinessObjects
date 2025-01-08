@@ -20,6 +20,8 @@ from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CrossEncoderReranker
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
 from langchain_community.callbacks.manager import get_openai_callback
+from langchain.globals import set_llm_cache
+from langchain_community.cache import SQLiteCache
 
 from src.prompts import Prompts
 from src.pymodels import SQLResponse, DatabaseModel, BirdSample, SpiderSample, BODescription
@@ -216,6 +218,7 @@ def valid_bo(
         file_name: str = '[args.ds]_[args.type]',
         split_k: int = 2,
     ):
+    set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{file_name}.db"))
     # "[file_name]_[db_id]-[idx_bo]"
     # restart from checkpoint
     processed_files = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
@@ -288,7 +291,7 @@ def predict_sql_bo(
     else:
         cross_encoder = None
 
-
+    
     # use train set to evaluate development set
     for db_id, samples in samples_by_db_id.items():
         vectorstore = get_vector_store(bos)

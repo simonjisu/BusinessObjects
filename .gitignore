@@ -169,3 +169,4 @@ data/spider
 data/pkl_files/
 *.zip
 .vscode/*
+cache/*
