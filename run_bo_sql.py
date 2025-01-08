@@ -500,10 +500,13 @@ if __name__ == '__main__':
         # (bo-query)
         if args.scenario in (0, 1, 2):
             is_question_query = False
+            print('bo-query scenario')
         # (question-query)
         elif args.scenario in (3,):
             is_question_query = True
+            print('question-query scenario')
         else:
+            print(f'Invalid scenario: {args.scenario}')
             raise ValueError('Invalid scenario')
         
         # args.type == test
@@ -525,7 +528,7 @@ if __name__ == '__main__':
             test_bos=test_bos, 
             chain=chain,
             prediction_path=prediction_path, 
-            file_name=f'{args.ds}_{args.type}', 
+            file_name=f'{args.ds}_{args.type}_{args.scenario}', 
             split_k=2,
             k_retrieval=args.k_retrieval,
             n_retrieval=args.n_retrieval,
