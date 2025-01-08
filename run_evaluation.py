@@ -295,8 +295,11 @@ def get_pred_results_valid_bo(
             gold_sql = pred['gold_sql']
             
             error_info = ''
+            criteria_length = 30000
             try:
                 pred_result = database.execute(pred_sql, rt_pandas=False)
+                if len(pred_result) > criteria_length:
+                    pred_result = pred_result[:criteria_length]
             except Exception as e:
                 pred_result = []
                 error_infos['pred_exec'].append((db_id, sample_id))
@@ -304,6 +307,8 @@ def get_pred_results_valid_bo(
             
             try:
                 gold_result = database.execute(gold_sql, rt_pandas=False)
+                if len(gold_result) > criteria_length:
+                    gold_result = gold_result[:criteria_length]
             except Exception as e:
                 error_infos['gold_exec'].append((db_id, sample_id))
                 error_info = 'Gold Execution Error:' + str(e)
