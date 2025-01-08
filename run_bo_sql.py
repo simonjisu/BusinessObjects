@@ -489,8 +489,9 @@ if __name__ == '__main__':
         if args.scenario in (0, 1, 2):
             with (experiment_folder / 'test_scenarios.json').open('w') as f:
                 test_scenarios = json.load(f)
-
-            test_bo_ids = test_scenarios[str(args.scenario)]
+            
+            sce = {0: "10", 1: "15", 2: "25"}[args.scenario]
+            test_bo_ids = test_scenarios[sce]
             test_bos = defaultdict(list)
             for db_id, bos in all_bos.items():
                 if db_id in test_bo_ids:
