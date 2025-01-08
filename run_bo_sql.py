@@ -519,7 +519,7 @@ if __name__ == '__main__':
         predict_sql_bo(
             samples=samples, 
             tables=tables, 
-            bos=test_bos, 
+            test_bos=test_bos, 
             chain=chain,
             prediction_path=prediction_path, 
             file_name=f'{args.ds}_{args.type}', 
