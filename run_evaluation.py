@@ -397,7 +397,6 @@ if __name__ == '__main__':
     tables = process_all_tables(tables, descriptions=all_descriptions)
 
     # sql predictions
-    
     if args.task in ('zero_shot', 'zero_shot_hint'):
         predictions = []
         with open(prediction_path / f'final_{args.ds}_{args.type}.jsonl', 'r') as f:

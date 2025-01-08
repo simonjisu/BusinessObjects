@@ -2,7 +2,7 @@
 uv run run_bo_sql.py \
     --ds spider \
     --type test \
-    --task zero_shot_hint \
+    --task zero_shot_hint_3 \
     --description_file description.json \
     --k_retrieval 5 \
     --n_retrieval 1 \
