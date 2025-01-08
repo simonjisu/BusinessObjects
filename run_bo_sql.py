@@ -86,15 +86,17 @@ class Sampler():
 
 def _format_interval(x: pd.Interval):
     return pd.Interval(
-        left=int(np.floor(x.left)), 
-        right=int(np.floor(x.right)),
-        closed=x.closed
+            left=int(np.floor(x.left)), 
+            right=int(np.floor(x.right)),
+            closed=x.closed
     )
 
 def _get_categories(s: pd.Series):
-    tiles = [0, 0.2, 0.4, 0.6, 0.8, 1]
-    df = pd.qcut(s, q=tiles, duplicates='drop')
-    return df
+    if s.nunique() == 1:
+        return pd.qcut(s, q=[0, 1], duplicates='drop')
+    else:
+        tiles = [0, 0.2, 0.4, 0.6, 0.8, 1]
+        return pd.qcut(s, q=tiles, duplicates='drop')
 
 def _get_df_from_bos(bos):
     df = []
@@ -183,13 +185,12 @@ def get_vector_store(bos: dict[str, list[dict[str, str]]]):
 
 def get_retriever(
         vectorstore: FAISS,
-        cross_encoder: HuggingFaceCrossEncoder,
-        db_id: str,
-        sample_ids: list[int],
+        db_id: str='',
+        cross_encoder: HuggingFaceCrossEncoder=None,
         n_retrieval: int = 3,
         k_retrieval: int = 10,
         score_threshold: float = 0.60,
-        use_reranker: bool = True
+        use_reranker: bool = False
     ) -> BaseRetriever:
     k_retrieval = k_retrieval if use_reranker else n_retrieval
     base_retriever = vectorstore.as_retriever(
@@ -197,7 +198,7 @@ def get_retriever(
         search_kwargs={
             'k': k_retrieval, 
             'score_threshold': score_threshold, 
-            'filter': {'db_id': db_id, 'sample_id': {'$in' : sample_ids}},
+            'filter': {'db_id': db_id},
         }
     )
     if use_reranker:
@@ -266,7 +267,7 @@ def valid_bo(
 def predict_sql_bo(
         samples: list[SpiderSample|BirdSample],
         tables: dict[DatabaseModel],
-        bos: dict[str, dict[str, list[str]|int]],
+        test_bos: dict[str, dict[str, list[str]|int]],
         chain: RunnableSequence,
         prediction_path: Path,
         file_name: str = '[args.ds]_[args.type]',
@@ -274,7 +275,7 @@ def predict_sql_bo(
         k_retrieval: int = 5,  # for test
         n_retrieval: int = 1,   # for test
         score_threshold: float = 0.65,
-        use_reranker: bool = True
+        use_reranker: bool = False
     ):
     processed_db_ids = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
     # restart from checkpoint
@@ -291,12 +292,13 @@ def predict_sql_bo(
     else:
         cross_encoder = None
 
-    
     # use train set to evaluate development set
     for db_id, samples in samples_by_db_id.items():
-        vectorstore = get_vector_store(bos)
+        set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{db_id}.db"))
+        
+        vectorstore = get_vector_store(test_bos)
         retriever = get_retriever(
-            vectorstore, cross_encoder, db_id, [],
+            vectorstore, db_id, cross_encoder,
             n_retrieval, k_retrieval, score_threshold, use_reranker
         )
         schema_str = get_schema_str(
@@ -322,7 +324,6 @@ def predict_sql_bo(
             res['pred_sql'] = output.full_sql_query
             res['retrieved'] = [doc.metadata['sample_id'] for doc in docs]
             res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
-            # full_sql_output = 1
             results.append(res)
 
         with open(prediction_path / f'{file_name}_{db_id}.json', 'w') as f:
@@ -342,6 +343,10 @@ if __name__ == '__main__':
     parser.add_argument('--use_reranker', action='store_true', help='Whether to use reranker or not')
     
     parser.add_argument('--db_id_group', type=int, default=-1, help='Group of db_ids to consider, < 0 means use all')
+    parser.add_argument('--scenario', type=int, default='0', help='Scenario to consider')
+    # scenario
+    # (ba-query) 0: 10 | 1: 15 | 2: 25 | (question-query) 4: 25
+    
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -476,12 +481,30 @@ if __name__ == '__main__':
         )
 
     elif args.task == 'zero_shot_hint':
-        bo_path = experiment_folder / 'predictions' / 'valid_bo' / f'final_{args.ds}_bo.json'
-        assert bo_path.exists(), f'Run with the `task=valid_bo, type=dev` first'
+        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
         with bo_path.open() as f:
-            bos = json.load(f)
+            all_bos = json.load(f)
+        
+        # (bo-query)
+        if args.scenario in (0, 1, 2):
+            with (experiment_folder / 'test_scenarios.json').open('w') as f:
+                test_scenarios = json.load(f)
 
+            test_bo_ids = test_scenarios[str(args.scenario)]
+            test_bos = defaultdict(list)
+            for db_id, bos in all_bos.items():
+                if db_id in test_bo_ids:
+                    bo_ids = test_bo_ids[db_id]
+                    test_bos[db_id].extend(list(filter(lambda x: x['sample_id'] in bo_ids, bos)))
+        # (question-query)
+        elif args.scenario in (4,):
+            pass
+        else:
+            raise ValueError('Invalid scenario')
+        
+        # args.type == test
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        samples = [x for x in samples if x.db_id in test_bo_ids]
         print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
         
         prompt = PromptTemplate(
@@ -495,7 +518,7 @@ if __name__ == '__main__':
         predict_sql_bo(
             samples=samples, 
             tables=tables, 
-            bos=bos, 
+            bos=test_bos, 
             chain=chain,
             prediction_path=prediction_path, 
             file_name=f'{args.ds}_{args.type}', 
