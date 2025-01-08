@@ -287,7 +287,7 @@ def predict_sql_bo(
         samples_by_db_id[sample.db_id].append(sample)
 
     if use_reranker:
-        cross_encoder = HuggingFaceCrossEncoder(model='cross-encoder/ms-marco-MiniLM-L-6-v2')
+        cross_encoder = HuggingFaceCrossEncoder(model_name='cross-encoder/ms-marco-MiniLM-L-6-v2')
     else:
         cross_encoder = None
 
@@ -296,7 +296,7 @@ def predict_sql_bo(
     for db_id, samples in samples_by_db_id.items():
         vectorstore = get_vector_store(bos)
         retriever = get_retriever(
-            vectorstore, cross_encoder, db_id, 
+            vectorstore, cross_encoder, db_id, [],
             n_retrieval, k_retrieval, score_threshold, use_reranker
         )
         schema_str = get_schema_str(

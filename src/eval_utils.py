@@ -7,17 +7,16 @@ import random
 
 from tqdm import tqdm
 from pathlib import Path
-from itertools import product
 from collections import defaultdict
 
 from zss import simple_distance, Node
 from apted import APTED
 from apted.helpers import Tree
 from typing import Tuple
-from itertools import product
 from scipy.optimize import linear_sum_assignment 
 from transformers import logging as tfloggings
 tfloggings.set_verbosity_error()
+from itertools import product, pairwise
 
 import spacy
 try:
@@ -126,7 +125,6 @@ def compute_tsed(sql1: exp.Query, sql2: exp.Query, build_type: str) -> Tuple[flo
     tsed = max(1-distance/max(node_count1,node_count2), 0)
     return tsed, distance
 
-
 def partial_matching_with_penalty(matrix: np.ndarray, penalty: float=0.0, maximize: bool=True, epsilon: float=1e-9):
     n, m = matrix.shape  # (# of source, # of target)
     size = max(n, m)
@@ -210,81 +208,142 @@ def get_final_score(
     return structural_score, semantic_score, round(f1, 6)
 
 def get_all_structural_score(
-        source_output, 
-        target_output, 
+        source_outputs: list[dict], 
+        target_outputs: list[dict], 
         build_type: str='apted',
         criteria: str='tsed',
         penalty: float = 0.01,
-    ):
+    ) -> list[float]:
     args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
     assert build_type in ['apted', 'zss'], f'build_type should be either apted or zss, but got {build_type}'
     assert criteria in ['tsed', 'distance'], f'criteria should be either tsed or distance, but got {criteria}'
-        
-    results = {}
-    for arg in args:
-        source_exists = bool(source_output[arg]) if arg != 'subqueries' else bool(source_output[arg][1:])
-        target_exists = bool(target_output[arg]) if arg != 'subqueries' else bool(target_output[arg][1:])
-        if target_exists and source_exists:
-            if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
-                source = [ast for _, ast, _ in source_output[arg]]
-                target = [ast for _, ast, _ in target_output[arg]]
-                structural_score = get_structural_score(source, target, build_type, criteria, penalty)
-            elif arg == 'subqueries':
-                source = source_output[arg][1:]
-                target = target_output[arg][1:]
-                structural_score = get_structural_score(source, target, build_type, criteria, penalty)
-            elif arg in ['distinct', 'limit']:
-                structural_score = 1.0 if criteria == 'tsed' else 0.0
-        elif target_exists ^ source_exists:
-            structural_score = 0.0 if criteria == 'tsed' else np.infty
-        else:
-            # they don't exist in both so, we can't measure the score
-            structural_score = None
-            # score = 0.0 if criteria == 'tsed' else np.infty
-        results[arg] = structural_score
     
-    scores = np.array([v for v in results.values() if v is not None])
-    epsilon = 1e-9
-    overall_score = np.round(np.mean(scores + epsilon), decimals=4)
-    return results, overall_score
+    structure_scores = []
+    for source_output, target_output in zip(source_outputs, target_outputs):
+        if source_output:
+            results = {}
+            for arg in args:
+                source_exists = bool(source_output[arg]) if arg != 'subqueries' else bool(source_output[arg][1:])
+                target_exists = bool(target_output[arg]) if arg != 'subqueries' else bool(target_output[arg][1:])
+                if target_exists and source_exists:
+                    if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
+                        source = [ast for _, ast, _ in source_output[arg]]
+                        target = [ast for _, ast, _ in target_output[arg]]
+                        structural_score = get_structural_score(source, target, build_type, criteria, penalty)
+                    elif arg == 'subqueries':
+                        source = source_output[arg][1:]
+                        target = target_output[arg][1:]
+                        structural_score = get_structural_score(source, target, build_type, criteria, penalty)
+                    elif arg in ['distinct', 'limit']:
+                        structural_score = 1.0 if criteria == 'tsed' else 0.0
+                elif target_exists ^ source_exists:
+                    structural_score = 0.0 if criteria == 'tsed' else np.infty
+                else:
+                    # they don't exist in both so, we can't measure the score
+                    structural_score = None
+                    # score = 0.0 if criteria == 'tsed' else np.infty
+                results[arg] = structural_score
+            
+            scores = np.array([v for v in results.values() if v is not None])
+            epsilon = 1e-9
+            overall_score = np.round(np.mean(scores + epsilon), decimals=4)
+        else:
+            overall_score = 0.0
+        structure_scores.append(overall_score)
+    return structure_scores
 
 def get_all_semantic_score(
-        source_output, 
-        target_output, 
+        source_outputs: list[dict], 
+        target_outputs: list[dict], 
         use_bert: bool=True,
         penalty: float=0.01,
         rescale_with_baseline: bool=True,
         criteria: str='tsed',
     ):
     args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
-
-    results = {}
-    for arg in args:
-        source_exists = bool(source_output[arg]) if arg != 'subqueries' else bool(source_output[arg][1:])
-        target_exists = bool(target_output[arg]) if arg != 'subqueries' else bool(target_output[arg][1:])
-        if target_exists and source_exists:
-            if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
-                source = [ast for _, ast, _ in source_output[arg]]
-                target = [ast for _, ast, _ in target_output[arg]]
-                semantic_score = get_semantic_score(source, target, use_bert, penalty, rescale_with_baseline)
-            elif arg == 'subqueries':
-                source = source_output[arg][1:]
-                target = target_output[arg][1:]
-                semantic_score = get_semantic_score(source, target, use_bert, penalty, rescale_with_baseline)
-            elif arg in ['distinct', 'limit']:
-                semantic_score = 1.0 if criteria == 'tsed' else 0.0
-        elif target_exists ^ source_exists:
-            semantic_score = 0.0 if criteria == 'tsed' else np.infty
-        else:
-            # they don't exist in both so, we can't measure the score
-            semantic_score = None
-            # score = 0.0 if criteria == 'tsed' else np.infty
-        results[arg] = semantic_score
+    def stringify(source_asts, target_asts):
+        source_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in source_asts]
+        target_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in target_asts]
+        return list(zip(source_str, target_str))
     
-    scores = np.array([v for v in results.values() if v is not None])
-    epsilon = 1e-9
-    overall_score = np.round(np.mean(scores + epsilon), decimals=4)
-    return results, overall_score
+    all_pairs = []
+    all_idxes = defaultdict(dict)
+    all_results = defaultdict(dict)
+    for k, (source_output, target_output) in enumerate(zip(source_outputs, target_outputs)):
+        for arg in args:
+            source_exists = bool(source_output[arg]) if arg != 'subqueries' else bool(source_output[arg][1:])
+            target_exists = bool(target_output[arg]) if arg != 'subqueries' else bool(target_output[arg][1:])
+            if target_exists and source_exists:
+                if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
+                    source = [ast for _, ast, _ in source_output[arg]]
+                    target = [ast for _, ast, _ in target_output[arg]]
+                    pairs = stringify(source, target)
+                    idxes = list(range(len(all_pairs), len(all_pairs)+len(pairs)))
+                    all_pairs.extend(pairs)
+                    all_idxes[k][arg] = idxes
+                    semantic_score = -1
+                elif arg == 'subqueries':
+                    source = source_output[arg][1:]
+                    target = target_output[arg][1:]
+                    pairs = stringify(source, target)
+                    idxes = list(range(len(all_pairs), len(all_pairs)+len(pairs)))
+                    all_pairs.extend(pairs)
+                    all_idxes[k][arg] = idxes
+                    semantic_score = -1
+                elif arg in ['distinct', 'limit']:
+                    semantic_score = 1.0 if criteria == 'tsed' else 0.0
+            elif target_exists ^ source_exists:
+                semantic_score = 0.0 if criteria == 'tsed' else np.infty
+            else:
+                # they don't exist in both so, we can't measure the score
+                semantic_score = None
+            all_results[k][arg] = semantic_score
+
+    source_str, target_str = zip(*all_pairs)
+    if use_bert:
+        source_str_list = []
+        target_str_list = []
+        sparse_idxes = []
+        idx2arg = defaultdict(dict)
+        for k, key_idxes in all_idxes.items():
+            for arg, idxes in key_idxes.items():
+                s, e = idxes[0], idxes[-1]+1
+                xs = list(product(source_str[s:e], target_str[s:e]))
+                s_str, t_str = list(zip(*xs))
+                idx = len(xs) + (sparse_idxes[-1] if sparse_idxes else 0)
+                sparse_idxes.append(idx)
+                idx2arg[idx] = (k, arg)
+                source_str_list.extend(s_str)
+                target_str_list.extend(t_str)
+        with warnings.catch_warnings(action='ignore'):
+            *_, F1 = bscore(source_str_list, target_str_list, lang='en', verbose=False, rescale_with_baseline=rescale_with_baseline, device='cuda')
+        scores = F1.numpy()
+    else:
+        scores = []
+        # for k, key_idxes in all_idxes.items():
+        #     for key, idxes in key_idxes.items():
+        #         s, e = idxes[0], idxes[-1]+1
+        #         s_str, t_str = list(zip(*product(source_str[s:e], target_str[s:e])))
+        #         for i, s in enumerate(s_str):
+        #             for j, t in enumerate(t_str):
+        #                 scores.append(s.similarity(t))
+        scores = np.array(scores)
+
+    for i, j in pairwise([0] + sparse_idxes):
+        n = int(np.sqrt(j - i))
+        matrix = scores[i:j].reshape(n, n)
+        k, arg = idx2arg[j]
+        *_, final_score = partial_matching_with_penalty(matrix, penalty, maximize=True)
+        all_results[k][arg] = final_score
+
+    semantic_scores = []
+    for k, results in all_results.items():
+        scores = np.array([v for v in results.values() if v is not None])
+        epsilon = 1e-9
+        overall_score = np.round(np.mean(scores + epsilon), decimals=4)
+        semantic_scores.append(overall_score)
+
+    return semantic_scores
 
 def get_partial_score(
         source_output, 

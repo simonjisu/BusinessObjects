@@ -3,6 +3,7 @@ import pickle
 import argparse
 import sqlglot
 import sqlglot.expressions as exp
+import numpy as np
 import pandas as pd
 from collections import defaultdict
 from tqdm import tqdm
@@ -15,7 +16,9 @@ from src.eval_utils import (
     result_eq, 
     check_if_exists_orderby,
     get_complexity,
-    get_all_partial_score
+    get_all_partial_score,
+    get_all_semantic_score,
+    get_all_structural_score
 
 )
 from src.data_preprocess import (
@@ -256,13 +259,23 @@ def get_pred_results_valid_bo(
             pred_parsed, _ = get_prediction_parsed_sql(preds, tables, patch_db_id=db_id)
             with open(eval_path / file_name, 'wb') as f:
                 pickle.dump(pred_parsed, f)
-            # print(f'Error parsing pred {args.ds}_{args.type}: {len(error_ids)}')
-
         with (eval_path / file_name).open('rb') as f:
             pred_parsed = pickle.load(f)
 
-        iterator = tqdm(preds, total=len(preds))
-        for pred in iterator:
+        # calculate structural, semantic and f1 scores
+        target_parsed_outputs = [target_parsed[db_id][x['sample_id']] for x in preds]
+        pred_parsed_outputs = [pred_parsed[db_id][x['sample_id']] for x in preds]
+        
+        structural_scores = get_all_structural_score(pred_parsed_outputs, target_parsed_outputs)
+        semantic_scores = get_all_semantic_score(pred_parsed_outputs, target_parsed_outputs)
+
+        epsilon = 1e-9
+        structural_scores = np.array(structural_scores)
+        semantic_scores = np.array(semantic_scores)
+        f1_scores = 2 * (structural_scores * semantic_scores) / (structural_scores + semantic_scores + epsilon)
+
+        iterator = tqdm(enumerate(preds), total=len(preds))
+        for k, pred in iterator:
             iterator.set_description(f'{p.stem} | pred_exec: {len(error_infos["pred_exec"])} | gold_exec: {len(error_infos["gold_exec"])} | python_script: {len(error_infos["python_script"])} | result: {len(error_infos["result"])}')
             train_bo_id = pred['retrieved']
             if not pred_res[db_id].get(train_bo_id):
@@ -272,25 +285,6 @@ def get_pred_results_valid_bo(
             sample_id = pred['sample_id']
             target_parsed_output = target_parsed[db_id][sample_id]
             gold_complexity = get_complexity(target_parsed_output)
-
-            pred_parsed_output = pred_parsed[db_id][sample_id]
-            if pred_parsed_output is None:
-                structural_score = 0.0
-                semantic_score = 0.0
-                f1_score = 0.0
-            else:
-                _, all_score = get_all_partial_score(
-                    source_output=pred_parsed_output,
-                    target_output=target_parsed_output,
-                    build_type='apted',
-                    criteria='tsed',
-                    penalty=0.01,
-                    use_bert=True,
-                    rescale_with_baseline=True
-                )
-                structural_score = all_score['structural']
-                semantic_score = all_score['semantic']
-                f1_score = all_score['overall']
 
             # Evaluate Execution Results
             pred_sql = pred['pred_sql'] 
@@ -335,9 +329,9 @@ def get_pred_results_valid_bo(
                     'db_id': db_id,
                     'retrieved': train_bo_id,
                     'gold_complexity': gold_complexity,
-                    'structural_score': structural_score,
-                    'semantic_score': semantic_score,
-                    'f1_score': f1_score,
+                    'structural_score': structural_scores[k],
+                    'semantic_score': semantic_scores[k],
+                    'f1_score': f1_scores[k],
                     'exec_result': score,
                 }
             )
