@@ -263,8 +263,8 @@ def get_pred_results_valid_bo(
             pred_parsed = pickle.load(f)
 
         # calculate structural, semantic and f1 scores
-        target_parsed_outputs = [target_parsed[db_id][x['sample_id']] for x in preds]
-        pred_parsed_outputs = [pred_parsed[db_id][x['sample_id']] for x in preds]
+        target_parsed_outputs = [target_parsed[db_id][x['sample_id']] for x in preds if target_parsed[db_id].get(x['sample_id'])]
+        pred_parsed_outputs = [pred_parsed[db_id][x['sample_id']] for x in preds if pred_parsed[db_id].get(x['sample_id'])]
         
         structural_scores = get_all_structural_score(pred_parsed_outputs, target_parsed_outputs)
         semantic_scores = get_all_semantic_score(pred_parsed_outputs, target_parsed_outputs)
@@ -277,6 +277,8 @@ def get_pred_results_valid_bo(
         iterator = tqdm(enumerate(preds), total=len(preds))
         for k, pred in iterator:
             iterator.set_description(f'{p.stem} | pred_exec: {len(error_infos["pred_exec"])} | gold_exec: {len(error_infos["gold_exec"])} | python_script: {len(error_infos["python_script"])} | result: {len(error_infos["result"])}')
+            if not pred_parsed[db_id].get(pred['sample_id']):
+               continue 
             train_bo_id = pred['retrieved']
             if not pred_res[db_id].get(train_bo_id):
                 pred_res[db_id][train_bo_id] = []

@@ -271,6 +271,12 @@ def get_all_semantic_score(
     all_results = defaultdict(dict)
     for k, (source_output, target_output) in enumerate(zip(source_outputs, target_outputs)):
         for arg in args:
+            # if not source_output:
+            #     all_results[k][arg] = 0.0
+            #     if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts', 'subqueries']:
+            #         all_idxes[k][arg] = [-1, -1]
+            #         all_pairs.extend([('None', 'None')])
+            #     continue
             source_exists = bool(source_output[arg]) if arg != 'subqueries' else bool(source_output[arg][1:])
             target_exists = bool(target_output[arg]) if arg != 'subqueries' else bool(target_output[arg][1:])
             if target_exists and source_exists:
