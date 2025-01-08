@@ -137,8 +137,6 @@ def get_pred_results(
         structural_scores = np.array(structural_scores)
         semantic_scores = np.array(semantic_scores)
         f1_scores = 2 * (structural_scores * semantic_scores) / (structural_scores + semantic_scores + epsilon)
-
-        
         
         iterator = tqdm(enumerate(preds), total=len(preds))
         for k, pred in iterator:
@@ -379,6 +377,8 @@ if __name__ == '__main__':
     parser.add_argument('--task', type=str, default='zero_shot', help='`zero_shot`, `zero_shot_hint`')
     parser.add_argument('--s', type=int, default=-1, help='start')
     parser.add_argument('--e', type=int, default=-1, help='end')
+    parser.add_argument('--scenario', type=int, default=-1, help='Scenario to consider')
+    
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -399,11 +399,24 @@ if __name__ == '__main__':
 
     # sql predictions
     if args.task in ('zero_shot', 'zero_shot_hint'):
-        predictions = []
-        with open(prediction_path / f'final_{args.ds}_{args.type}.jsonl', 'r') as f:
-            preds = f.readlines()
-            for p in preds:
-                predictions.append(json.loads(p))
+        file_post_fix = f'{args.ds}_{args.type}' if args.scenario < 0 else f'{args.ds}_{args.type}_{args.scenario}'
+        split_k = 2 if args.scenario < 0 else 3
+        final_file = f'final_{file_post_fix}.json'
+        if not (prediction_path / final_file).exists():
+            all_results = []
+            paths = sorted(list(prediction_path.glob(f'{file_post_fix}_*.json')))
+            for p in paths:
+                with p.open() as f:
+                    results = json.load(f)
+                    for r in results:
+                        r.pop('rationale')
+                        r['db_id'] = p.stem.split('_', split_k)[-1]
+                    all_results.extend(results)
+            with open(prediction_path / final_file, 'w') as f:
+                json.dump(all_results, f, indent=4)
+
+        with open(prediction_path / final_file, 'r') as f:
+            preds = json.load(f)
     
         # get target_parsed_sql
         file_name = f'{args.ds}_{args.type}_parsed.pkl'
@@ -420,7 +433,7 @@ if __name__ == '__main__':
         # get pred_parsed_sql 
         file_name = f'{args.ds}_{args.type}_parsed_pred.pkl'
         if not (eval_path / file_name).exists():
-            pred_parsed, error_ids = get_prediction_parsed_sql(predictions, tables)
+            pred_parsed, error_ids = get_prediction_parsed_sql(preds, tables)
             with open(eval_path / file_name, 'wb') as f:
                 pickle.dump(pred_parsed, f)
             print(f'Error parsing pred {args.ds}_{args.type}: {len(error_ids)}')
@@ -431,13 +444,13 @@ if __name__ == '__main__':
         get_pred_results(
             proj_path,
             eval_path,
-            predictions, 
+            preds, 
             target_parsed,
             pred_parsed,
             tables,
-            file_name=f'{args.ds}_{args.type}',
+            file_name=file_post_fix,
             ds=args.ds,
-            split_k=2
+            split_k=split_k
         )
 
         # save it as dataframe
