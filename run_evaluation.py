@@ -28,6 +28,7 @@ from src.data_preprocess import (
 )
 from langchain.globals import set_llm_cache
 from langchain_community.cache import SQLiteCache
+from run_bo_sql import _get_categories, _format_interval
 
 def load_predictions(prediction_path: Path, filename: str):
     predictions = []
@@ -448,7 +449,7 @@ if __name__ == '__main__':
         pd.DataFrame(df).to_csv(eval_path / f'{args.ds}_{args.type}.csv', index=False)
 
     elif args.task == 'valid_bo':
-        filter_db_ids = ['bike_share_1', 'language_corpus', 'donor']
+        filter_db_ids = ['bike_share_1', 'language_corpus', 'donor', 'menu', 'movie_platform']
         # valid_bo
         paths = sorted(list(prediction_path.glob(f'{args.ds}_{args.type}_*.json')))
         paths = [p for p in paths if p.stem.split('_', 2)[-1].split('-')[0] not in filter_db_ids]
@@ -478,5 +479,46 @@ if __name__ == '__main__':
             file_name=f'{args.ds}_{args.type}',
             ds=args.ds,
         )
+    elif args.task == 'cal_merits':
+        # dev or test
+        df_base = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'{args.ds}_{args.type}.csv')
+        df_bo = pd.read_csv(experiment_folder / 'evals' / 'valid_bo' / f'{args.ds}_{args.type}.csv')
+        df_cates = df_base.groupby('db_id')['gold_complexity'].apply(_get_categories).rename('category').apply(_format_interval)
+        df_base = pd.merge(df_base, df_cates.reset_index('db_id', drop=True), left_index=True, right_index=True)
+
+        df = pd.merge(
+            left=df_bo,
+            right=df_base,
+            how='inner',
+            on=['db_id', 'sample_id', 'gold_complexity'],
+            suffixes=('_bo', '_base')
+        )
+
+        group_column = ['db_id', 'retrieved'] # , 
+        execution_improvement = df.groupby(group_column)[['exec_result_base', 'exec_result_bo']].sum().diff(axis=1)['exec_result_bo'].rename('execution_improvement')
+        merit_structural = df.groupby(group_column)[['structural_score_base', 'structural_score_bo']].mean().diff(axis=1)['structural_score_bo'].rename('merit_structural')
+        merit_semantic = df.groupby(group_column)[['semantic_score_base', 'semantic_score_bo']].mean().diff(axis=1)['semantic_score_bo'].rename('merit_semantic')
+        merit = df.groupby(group_column)[['f1_score_base', 'f1_score_bo']].mean().diff(axis=1)['f1_score_bo'].rename('merit')
+
+        ranks = merit.reset_index().groupby(['db_id'])['merit'].rank(method='first', ascending=False).rename('rank').astype(np.int64)
+        merit = pd.concat([merit.reset_index(), ranks], axis=1)
+        merit_by_rank = merit.sort_values(by=['db_id', 'rank'], ascending=True)
+
+        merit_by_rank.to_csv(experiment_folder / 'evals' / f'merits_{args.ds}_{args.type}.csv', index=False)
+
+        # create scenarios
+        test_bos = defaultdict(list)
+        for x in merit_by_rank.loc[:, ['db_id', 'retrieved']].to_dict(orient='records'):
+            test_bos[x['db_id']].append(x['retrieved'])
+
+        n_bos = range(5, 26, 5)
+        test_scenarios = defaultdict(dict)
+        for n_bo in n_bos:
+            for db_id in test_bos:
+                test_scenarios[n_bo][db_id] = test_bos[db_id][:n_bo]
+
+        with (experiment_folder / 'test_scenarios.json').open('w') as f:
+            json.dump(test_scenarios, f)
+
     else:
         raise ValueError(f'Invalid task: {args.task}')
