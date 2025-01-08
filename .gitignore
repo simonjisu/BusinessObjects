@@ -168,3 +168,4 @@ data/tpch/tables
 data/spider
 data/pkl_files/
 *.zip
+.vscode
