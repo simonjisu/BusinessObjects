@@ -411,16 +411,18 @@ if __name__ == '__main__':
             for p in paths:
                 with p.open() as f:
                     results = json.load(f)
-                    for r in results:
-                        r.pop('rationale')
-                        r['db_id'] = p.stem.split('_', split_k)[-1]
+                
+                for r in results:
+                    r.pop('rationale')
+                    r['db_id'] = p.stem.split('_', split_k)[-1]
 
-                        found = False
-                        for s in samples:
-                            if r['sample_id'] == s.sample_id:
-                                found = True
-                        r['gold_sql'] = s.final.sql
-                        assert found, r['sample_id']
+                    found = False
+                    for s in samples:
+                        if r['sample_id'] == s.sample_id:
+                            found = True
+                            break
+                    r['gold_sql'] = s.final.sql
+                    assert found, r['sample_id']
 
                     all_results.extend(results)
             with open(prediction_path / final_file, 'w') as f:
