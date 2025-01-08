@@ -356,6 +356,8 @@ if __name__ == '__main__':
     parser.add_argument('--description_file', type=str, default='description.json', help='File containing the descriptions.')
     parser.add_argument('--type', type=str, default='dev', help='Type of data to use for. dev or test')
     parser.add_argument('--task', type=str, default='zero_shot', help='`zero_shot`, `zero_shot_hint`')
+    parser.add_argument('--s', type=int, default=-1, help='start')
+    parser.add_argument('--e', type=int, default=-1, help='end')
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -429,6 +431,9 @@ if __name__ == '__main__':
     elif args.task == 'valid_bo':
         # valid_bo
         paths = sorted(list(prediction_path.glob(f'{args.ds}_{args.type}_*.json')))
+        if args.s >= 0 and args.e >= 0:
+            paths = paths[args.s:args.e]
+        
         print(f'Found {len(paths)} files')
         
         # get target_parsed_sql
