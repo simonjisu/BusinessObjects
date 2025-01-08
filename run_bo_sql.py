@@ -487,7 +487,7 @@ if __name__ == '__main__':
         
         # (bo-query)
         if args.scenario in (0, 1, 2):
-            with (experiment_folder / 'test_scenarios.json').open('w') as f:
+            with (experiment_folder / 'test_scenarios.json').open('r') as f:
                 test_scenarios = json.load(f)
             
             sce = {0: "10", 1: "15", 2: "25"}[args.scenario]
