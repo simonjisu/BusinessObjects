@@ -253,6 +253,8 @@ def get_pred_results_valid_bo(
         with p.open() as f:
             preds = json.load(f)  # list[dict]
 
+        if not preds:
+            continue
         # get pred_parsed_sql 
         file_name = f'{p.stem}_parsed_pred.pkl'
         if not (eval_path / file_name).exists():
