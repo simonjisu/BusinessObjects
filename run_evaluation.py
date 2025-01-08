@@ -424,7 +424,7 @@ if __name__ == '__main__':
                     r['gold_sql'] = s.final.sql
                     assert found, r['sample_id']
 
-                    all_results.extend(results)
+                all_results.extend(results)
             with open(prediction_path / final_file, 'w') as f:
                 json.dump(all_results, f, indent=4)
 
