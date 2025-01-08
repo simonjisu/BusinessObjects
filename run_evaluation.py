@@ -295,8 +295,8 @@ def get_pred_results_valid_bo(
             gold_sql = pred['gold_sql']
             
             error_info = ''
-            pred_sql = pred_sql.split('LIMIT')[0].split('limit')[0] + ' LIMIT 100;'
-            gold_sql = gold_sql.split('LIMIT')[0].split('limit')[0] + ' LIMIT 100;'
+            # pred_sql = pred_sql.split('LIMIT')[0].split('limit')[0] + ' LIMIT 100;'
+            # gold_sql = gold_sql.split('LIMIT')[0].split('limit')[0] + ' LIMIT 100;'
             try:
                 pred_result = database.execute(pred_sql, rt_pandas=False)
             except Exception as e:
