@@ -218,7 +218,6 @@ def valid_bo(
         file_name: str = '[args.ds]_[args.type]',
         split_k: int = 2,
     ):
-    set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{file_name}.db"))
     # "[file_name]_[db_id]-[idx_bo]"
     # restart from checkpoint
     processed_files = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
@@ -227,8 +226,9 @@ def valid_bo(
         print(f'Skip some processed db_ids: {len(processed_files)} {processed_files[-5:]}')
 
     for detail_file_name, train_bos in bos.items():
+        set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{detail_file_name}.db"))
         train_bos = train_bos['train_bos']
-        db_id = detail_file_name.split('-')[0]
+        db_id = detail_file_name.split('-')[0]    
         schema_str = get_schema_str(
             schema=tables[db_id].db_schema, 
             foreign_keys=tables[db_id].foreign_keys,
