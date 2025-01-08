@@ -270,8 +270,8 @@ def predict_sql_bo(
         test_bos: dict[str, dict[str, list[str]|int]],
         chain: RunnableSequence,
         prediction_path: Path,
-        file_name: str = '[args.ds]_[args.type]',
-        split_k: int = 2,
+        file_name: str = '[args.ds]_[args.type]_[args.scenario]',
+        split_k: int = 3,
         k_retrieval: int = 5,  # for test
         n_retrieval: int = 1,   # for test
         score_threshold: float = 0.65,
@@ -529,7 +529,7 @@ if __name__ == '__main__':
             chain=chain,
             prediction_path=prediction_path, 
             file_name=f'{args.ds}_{args.type}_{args.scenario}', 
-            split_k=2,
+            split_k=3,
             k_retrieval=args.k_retrieval,
             n_retrieval=args.n_retrieval,
             score_threshold=args.score_threshold,
