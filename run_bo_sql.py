@@ -295,8 +295,8 @@ def predict_sql_bo(
 
     # use train set to evaluate development set
     for db_id, samples in samples_by_db_id.items():
-        set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{db_id}.db"))
-        print('Creating vector store...')
+        set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{file_name}_{db_id}.db"))
+        print(f'[{db_id}] Creating vector store...')
         vectorstore = get_vector_store(test_bos, is_question_query)
         retriever = get_retriever(
             vectorstore, db_id, cross_encoder,
