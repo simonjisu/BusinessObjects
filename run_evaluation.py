@@ -124,33 +124,47 @@ def get_pred_results(
                 db_file=str(proj_path / 'data' / 'spider' / 'database' / db_id / f'{db_id}.sqlite'), 
                 foreign_keys=tables[db_id].foreign_keys
             )
+
+        preds = [x for x in preds if pred_parsed[db_id].get(x['sample_id'])]
+        target_parsed_outputs = [target_parsed[db_id][x['sample_id']] for x in preds]
+        pred_parsed_outputs = [pred_parsed[db_id][x['sample_id']] for x in preds]
         
-        iterator = tqdm(preds, total=len(preds))
-        for pred in iterator:
+        structural_scores = get_all_structural_score(pred_parsed_outputs, target_parsed_outputs)
+        semantic_scores = get_all_semantic_score(pred_parsed_outputs, target_parsed_outputs)
+
+        epsilon = 1e-9
+        structural_scores = np.array(structural_scores)
+        semantic_scores = np.array(semantic_scores)
+        f1_scores = 2 * (structural_scores * semantic_scores) / (structural_scores + semantic_scores + epsilon)
+
+        
+        
+        iterator = tqdm(enumerate(preds), total=len(preds))
+        for k, pred in iterator:
             iterator.set_description(f'{db_id} | pred_exec: {len(error_infos["pred_exec"])} | gold_exec: {len(error_infos["gold_exec"])} | python_script: {len(error_infos["python_script"])} | result: {len(error_infos["result"])}')
             # Evaluate Structural and Semantic score
             sample_id = pred['sample_id']
             target_parsed_output = target_parsed[db_id][sample_id]
             gold_complexity = get_complexity(target_parsed_output)
 
-            pred_parsed_output = pred_parsed[db_id][sample_id]
-            if pred_parsed_output is None:
-                structural_score = 0.0
-                semantic_score = 0.0
-                f1_score = 0.0
-            else:
-                _, all_score = get_all_partial_score(
-                    source_output=pred_parsed_output,
-                    target_output=target_parsed_output,
-                    build_type='apted',
-                    criteria='tsed',
-                    penalty=0.01,
-                    use_bert=True,
-                    rescale_with_baseline=True
-                )
-                structural_score = all_score['structural']
-                semantic_score = all_score['semantic']
-                f1_score = all_score['overall']
+            # pred_parsed_output = pred_parsed[db_id][sample_id]
+            # if pred_parsed_output is None:
+            #     structural_score = 0.0
+            #     semantic_score = 0.0
+            #     f1_score = 0.0
+            # else:
+            #     _, all_score = get_all_partial_score(
+            #         source_output=pred_parsed_output,
+            #         target_output=target_parsed_output,
+            #         build_type='apted',
+            #         criteria='tsed',
+            #         penalty=0.01,
+            #         use_bert=True,
+            #         rescale_with_baseline=True
+            #     )
+            #     structural_score = all_score['structural']
+            #     semantic_score = all_score['semantic']
+            #     f1_score = all_score['overall']
 
             # Evaluate Execution Results
             pred_sql = pred['pred_sql'] 
@@ -192,9 +206,9 @@ def get_pred_results(
                     'sample_id': sample_id, 
                     'db_id': db_id,
                     'gold_complexity': gold_complexity,
-                    'structural_score': structural_score,
-                    'semantic_score': semantic_score,
-                    'f1_score': f1_score,
+                    'structural_score': float(structural_scores[k]),
+                    'semantic_score': float(semantic_scores[k]),
+                    'f1_score': float(f1_scores[k]),
                     'exec_result': score,
                 }
             )
@@ -202,8 +216,8 @@ def get_pred_results(
         with open(eval_path / f'{file_name}_{db_id}.json', 'w') as f:
             json.dump(output_results, f, indent=4)
 
-    with open(proj_path / 'experiments' / ds / 'evals' / f'{file_name}_error_infos.json', 'w') as f:
-        json.dump(error_infos, f, indent=4)
+    # with open(proj_path / 'experiments' / ds / 'evals' / f'{file_name}_error_infos.json', 'w') as f:
+    #     json.dump(error_infos, f, indent=4)
 
 def get_pred_results_valid_bo(
         proj_path: Path,

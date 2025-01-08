@@ -163,12 +163,12 @@ def create_vt_ba(
         with (prediction_path / f'{file_name}_{db_id}.json').open('w') as f:
             json.dump(results, f, indent=4)
 
-def get_vector_store(bos: dict[str, list[dict[str, str]]]):
+def get_vector_store(bos: dict[str, list[dict[str, str]]], is_question_query: bool=False) -> FAISS:
     documents = []
     for db_id, samples in bos.items():
         for x in samples:
             doc = Document(
-                page_content=x['ba'],
+                page_content=x['ba'] if not is_question_query else x['question'],
                 metadata={
                     'sample_id': x['sample_id'],
                     'db_id': db_id,
@@ -275,7 +275,8 @@ def predict_sql_bo(
         k_retrieval: int = 5,  # for test
         n_retrieval: int = 1,   # for test
         score_threshold: float = 0.65,
-        use_reranker: bool = False
+        use_reranker: bool = False,
+        is_question_query: bool = False
     ):
     processed_db_ids = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
     # restart from checkpoint
@@ -296,7 +297,7 @@ def predict_sql_bo(
     for db_id, samples in samples_by_db_id.items():
         set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{db_id}.db"))
         print('Creating vector store...')
-        vectorstore = get_vector_store(test_bos)
+        vectorstore = get_vector_store(test_bos, is_question_query)
         retriever = get_retriever(
             vectorstore, db_id, cross_encoder,
             n_retrieval, k_retrieval, score_threshold, use_reranker
@@ -411,7 +412,6 @@ if __name__ == '__main__':
         with bo_path.open() as f:
             bos = json.load(f)
 
-        
         with open(experiment_folder / f'partial_{args.ds}_db_ids.json', 'w') as f:
             json.dump(partial_db_ids, f, indent=4)
         
@@ -484,22 +484,25 @@ if __name__ == '__main__':
         bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
         with bo_path.open() as f:
             all_bos = json.load(f)
+
+        # test_scenarios
+        with (experiment_folder / 'test_scenarios.json').open('r') as f:
+                test_scenarios = json.load(f)
+            
+        sce = {0: "10", 1: "15", 2: "25", 3: "25"}[args.scenario]
+        test_bo_ids = test_scenarios[sce]
+        test_bos = defaultdict(list)
+        for db_id, bos in all_bos.items():
+            if db_id in test_bo_ids:
+                bo_ids = test_bo_ids[db_id]
+                test_bos[db_id].extend(list(filter(lambda x: x['sample_id'] in bo_ids, bos)))
         
         # (bo-query)
         if args.scenario in (0, 1, 2):
-            with (experiment_folder / 'test_scenarios.json').open('r') as f:
-                test_scenarios = json.load(f)
-            
-            sce = {0: "10", 1: "15", 2: "25"}[args.scenario]
-            test_bo_ids = test_scenarios[sce]
-            test_bos = defaultdict(list)
-            for db_id, bos in all_bos.items():
-                if db_id in test_bo_ids:
-                    bo_ids = test_bo_ids[db_id]
-                    test_bos[db_id].extend(list(filter(lambda x: x['sample_id'] in bo_ids, bos)))
+            is_question_query = False
         # (question-query)
         elif args.scenario in (4,):
-            pass
+            is_question_query = True
         else:
             raise ValueError('Invalid scenario')
         
@@ -527,7 +530,8 @@ if __name__ == '__main__':
             k_retrieval=args.k_retrieval,
             n_retrieval=args.n_retrieval,
             score_threshold=args.score_threshold,
-            use_reranker=args.use_reranker
+            use_reranker=args.use_reranker,
+            is_question_query=is_question_query
         )
 
         # -----------------------------------------------------------------
