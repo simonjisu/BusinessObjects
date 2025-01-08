@@ -501,7 +501,7 @@ if __name__ == '__main__':
         if args.scenario in (0, 1, 2):
             is_question_query = False
         # (question-query)
-        elif args.scenario in (4,):
+        elif args.scenario in (3,):
             is_question_query = True
         else:
             raise ValueError('Invalid scenario')
