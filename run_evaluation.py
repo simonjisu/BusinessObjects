@@ -400,6 +400,8 @@ if __name__ == '__main__':
 
     # sql predictions
     if args.task in ('zero_shot', 'zero_shot_hint'):
+        filter_db_ids = ['bike_share_1', 'language_corpus', 'donor', 'menu', 
+                         'movie_platform', 'talkingdata', 'authors', 'image_and_language']
         file_post_fix = f'{args.ds}_{args.type}' if args.scenario < 0 else f'{args.ds}_{args.type}_{args.scenario}'
         split_k = 2 if args.scenario < 0 else 3
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
@@ -432,6 +434,8 @@ if __name__ == '__main__':
             preds = json.load(f)
         # filter samples with db_id
         res_db_ids = {r['db_id'] for r in preds}
+        # filter db_ids 
+        res_db_ids = res_db_ids - set(filter_db_ids)
         print(f'Found {len(res_db_ids)} db_ids')
         preds = [p for p in preds if p['db_id'] in res_db_ids]
         samples = [s for s in samples if s.db_id in res_db_ids]
