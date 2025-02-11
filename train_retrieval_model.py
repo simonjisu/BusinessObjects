@@ -170,7 +170,7 @@ if __name__ == '__main__':
             load_best_model_at_end=True,
             logging_dir=f'logs/{exp_name}',
         )
-        loss = losses.CachedMultipleNegativesRankingLoss(model, mini_batch_size=args.per_device_train_batch_size)
+        loss = losses.CachedMultipleNegativesRankingLoss(model, mini_batch_size=args.per_device_train_batch_size // 2)
 
         dev_evaluator = TripletEvaluator(
             anchors=dev_ds['anchor'],
