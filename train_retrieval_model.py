@@ -20,9 +20,9 @@ import random
 
 class RetrievalDataset():
     def __init__(self, data: dict, is_train: bool=True):
-        self.samples = self._map_samples_key_to_int(data['samples'])
-        self.sample_ids = self._align_sample_ids(data['sample_ids'])
         self.is_train = is_train
+        self.samples = self._map_samples_key_to_int(data['samples'])
+        self.sample_ids = self._align_sample_ids(data['sample_ids'], is_train)
         
     def __len__(self):
         return len(self.sample_ids)
@@ -32,14 +32,14 @@ class RetrievalDataset():
         samples['ba'] = {int(k): v for k, v in samples['ba'].items()}
         return samples
 
-    def _align_sample_ids(self, sample_ids: list[dict[str, int|list[int]]]):
+    def _align_sample_ids(self, sample_ids: list[dict[str, int|list[int]]], is_train: bool):
         # {'pos: pos, 'neg': [neg1, neg2, ...]}
         # -> list of [pos, neg] to make (anchor, positive, negative)
         flatten_sample_ids = []
         for x in sample_ids:
             pos_id = int(x['pos'])
             neg_ids = [int(i) for i in x['neg']]
-            if self.is_train:
+            if is_train:
                 flatten_sample_ids.append({'pos': pos_id, 'neg': random.choice(neg_ids)})
             else:
                 for neg_id in neg_ids:
