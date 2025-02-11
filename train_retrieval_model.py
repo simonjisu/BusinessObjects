@@ -110,7 +110,15 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train retrieval model')
     parser.add_argument('--task', type=str, default='retrieval', help='`retrieval`, `data_prep`')
     parser.add_argument('--ds', type=str, default='bird', help='Dataset to use for training. spider or bird') 
+    parser.add_argument('--num_cpus', type=int, default=1, help='Number of cpus to use for parallel processing')
+    parser.add_argument('--num_train_epochs', type=int, default=3, help='Number of training epochs')
+    parser.add_argument('--learning_rate', type=float, default=2e-5, help='Learning rate')
+    parser.add_argument('--per_device_train_batch_size', type=int, default=64, help='Batch size')
+    parser.add_argument('--per_device_eval_batch_size', type=int, default=128, help='Batch size')
+    parser.add_argument('--logging_steps', type=int, default=10, help='Logging steps')
     
+    
+
     args = parser.parse_args()
     proj_path = Path('.').resolve()
     description_file = f'description.json' if args.ds == 'spider' else f'{args.ds}_description.json'
@@ -129,13 +137,13 @@ if __name__ == '__main__':
     # data preparation
     if args.task == 'data_prep':
         assert (experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json').exists(), f'Please create bo first to generate the data'
-        data = split_train_dev_retrieval_data(experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json', num_cpus=4)
-        with open(experiment_folder / 'predictions' / 'create_bo' / f'{args.ds}_{args.task}_hard_negative.json', 'w') as f:
+        data = split_train_dev_retrieval_data(experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json', num_cpus=args.num_cpus)
+        with open(experiment_folder / 'predictions' / 'create_bo' / f'hard_negative.json', 'w') as f:
             json.dump(data, f)
 
     elif args.task == 'retrieval':
         # train retrieval model
-        with open(experiment_folder / 'predictions' / 'create_bo' / f'{args.ds}_{args.task}_hard_negative.json', 'r') as f:
+        with open(experiment_folder / 'predictions' / 'create_bo' / f'hard_negative.json', 'r') as f:
             data = json.load(f)
 
         model = SentenceTransformer('all-mpnet-base-v2')
@@ -147,12 +155,12 @@ if __name__ == '__main__':
 
         args = SentenceTransformerTrainingArguments(
             output_dir=f'models/{exp_name}',
-            num_train_epochs=3,
-            learning_rate=2e-5,
-            per_device_train_batch_size=64,
-            per_device_eval_batch_size=128,
+            num_train_epochs=args.num_train_epochs,
+            learning_rate=args.learning_rate,
+            per_device_train_batch_size=args.per_device_train_batch_size,
+            per_device_eval_batch_size=args.per_device_train_batch_size,
             warmup_ratio=0.1,
-            logging_steps=100,
+            logging_steps=args.logging_steps,
             batch_sampler=BatchSamplers.NO_DUPLICATES,
             eval_strategy="steps",
             torch_empty_cache_steps=200,
