@@ -16,6 +16,7 @@ from src.data_preprocess import (
     load_raw_data,
     process_all_tables,
 )
+import random
 
 class RetrievalDataset():
     def __init__(self, data: dict):
@@ -36,7 +37,7 @@ class RetrievalDataset():
         flatten_sample_ids = []
         for x in sample_ids:
             pos_id = int(x['pos'])
-            neg_ids = [int(i) for i in x['neg']]
+            neg_ids = random.choice([int(i) for i in x['neg']])
             for neg_id in neg_ids:
                 flatten_sample_ids.append({'pos': pos_id, 'neg': neg_id})
 
@@ -117,8 +118,6 @@ if __name__ == '__main__':
     parser.add_argument('--per_device_eval_batch_size', type=int, default=128, help='Batch size')
     parser.add_argument('--logging_steps', type=int, default=10, help='Logging steps')
     
-    
-
     args = parser.parse_args()
     proj_path = Path('.').resolve()
     description_file = f'description.json' if args.ds == 'spider' else f'{args.ds}_description.json'
@@ -163,7 +162,7 @@ if __name__ == '__main__':
             logging_steps=args.logging_steps,
             batch_sampler=BatchSamplers.NO_DUPLICATES,
             eval_strategy="steps",
-            torch_empty_cache_steps=200,
+            torch_empty_cache_steps=100,
             save_strategy="steps",
             save_steps=100,
             save_total_limit=2,
