@@ -19,41 +19,46 @@ from src.data_preprocess import (
 import random
 
 class RetrievalDataset():
-    def __init__(self, data: dict, n_neg_sample: int=5, is_train: bool=True):
+    def __init__(self, data: dict, is_train: bool=True):
         self.is_train = is_train
-        self.n_neg_sample = n_neg_sample
-        self.samples = self._map_samples_key_to_int(data['samples'])
-        self.sample_ids = self._align_sample_ids(data['sample_ids'], n_neg_sample, is_train)
+        self.samples = self._align_samples_key_to_int(data['samples'])
+        self.sample_ids = self._align_sample_ids(data['sample_ids'])
         
     def __len__(self):
         return len(self.sample_ids)
     
-    def _map_samples_key_to_int(self, samples: dict[str, dict[int|str, str]]):
+    def _align_samples_key_to_int(self, samples: dict[str, dict[int|str, str]]):
         samples['question'] = {int(k): v for k, v in samples['question'].items()}
         samples['ba'] = {int(k): v for k, v in samples['ba'].items()}
         return samples
 
-    def _align_sample_ids(self, sample_ids: list[dict[str, int|list[int]]], n_neg_sample: int, is_train: bool):
+    def _align_sample_ids(self, sample_ids: list[dict[str, int|list[int]]]):
         # {'pos: pos, 'neg': [neg1, neg2, ...]}
         # -> list of [pos, neg] to make (anchor, positive, negative)
-        flatten_sample_ids = []
+        _sample_ids = []
         for x in sample_ids:
             pos_id = int(x['pos'])
             neg_ids = [int(i) for i in x['neg']]
-            if is_train:
-                random.shuffle(neg_ids)
-                neg_ids = neg_ids[:n_neg_sample]
-            
-            for neg_id in neg_ids:
-                flatten_sample_ids.append({'pos': pos_id, 'neg': neg_id})
+            if self.is_train:
+                _sample_ids.append({'pos': pos_id, 'neg': neg_ids})
+            else:
+                for neg_id in neg_ids:
+                    _sample_ids.append({'pos': pos_id, 'neg': neg_id})
 
-        return flatten_sample_ids
+        return _sample_ids
         
     def __getitem__(self, idx):
         x = self.sample_ids[idx]
-        question = self.samples['question'][x['pos']]
-        pos_ba = self.samples['ba'][x['pos']]
-        neg_ba = self.samples['ba'][x['neg']]
+        pos_id = x['pos']
+        if self.is_train:
+            neg_ids = x['neg']
+            neg_id = random.choice(neg_ids)
+        else:
+            neg_id = x['neg']
+
+        question = self.samples['question'][pos_id]
+        pos_ba = self.samples['ba'][pos_id]
+        neg_ba = self.samples['ba'][neg_id]
 
         return {
             'anchor': question,
@@ -73,10 +78,14 @@ def run_parallel(func, args, num_cpus: int=1):
     pool.join()
     return results
 
+def extract_first_number_from_index(x: pd.Index):
+    x = x.tolist()
+    x = list(map(lambda y: float(y.lstrip('(').split(',')[0]), x))
+    return x
 
 def get_hard_negative_samples(df: pd.DataFrame, n_neg_each_db: int=1):
     db_ids = df['db_id'].unique()
-    samples = df.loc[:, ['sample_id', 'question', 'ba']].set_index('sample_id').to_dict('dict')  # question, ba key -- {sample_id: value}
+    samples = df.loc[:, ['sample_id', 'question', 'ba', 'gold_complexity_cates']].set_index('sample_id').to_dict('dict')  # question, ba key -- {sample_id: value}
     sample_ids = []
 
     for db_id in db_ids:
@@ -102,6 +111,11 @@ def split_train_dev_retrieval_data(train_bo_path: Path|str, frac: float=0.9, n_q
     df['gold_complexity_cates'] = cates
     df['gold_complexity_codes'] = cates.cat.codes
 
+    distribution = df.loc[:, 'gold_complexity_cates'].value_counts().sort_index(key=extract_first_number_from_index).to_dict()
+
+    with open(train_bo_path.parent / f'complexity_distribution.json', 'w') as f:
+        json.dump(distribution)
+        
     # split train and dev by equal complexity distribution
     df_train = df.groupby('gold_complexity_codes').sample(frac=frac, random_state=random_state)
     df_dev = df.drop(df_train.index)
@@ -122,8 +136,9 @@ if __name__ == '__main__':
     parser.add_argument('--learning_rate', type=float, default=2e-5, help='Learning rate')
     parser.add_argument('--per_device_train_batch_size', type=int, default=256, help='Batch size')
     parser.add_argument('--per_device_eval_batch_size', type=int, default=128, help='Batch size')
-    parser.add_argument('--logging_steps', type=int, default=10, help='Logging steps')
-    parser.add_argument('--n_neg_sample', type=int, default=1, help='Number of negative samples to use for training')
+    parser.add_argument('--logging_steps', type=int, default=1, help='Logging steps')
+    parser.add_argument('--save_steps', type=int, default=10, help='Save steps')
+    # parser.add_argument('--n_neg_sample', type=int, default=1, help='Number of negative samples to use for training')
     
     args = parser.parse_args()
     proj_path = Path('.').resolve()
@@ -154,8 +169,8 @@ if __name__ == '__main__':
 
         model = SentenceTransformer('all-mpnet-base-v2')
 
-        train_ds = Dataset.from_generator(RetrievalDataset(data['train'], args.n_neg_sample, is_train=True).__iter__)
-        dev_ds = Dataset.from_generator(RetrievalDataset(data['dev'], args.n_neg_sample, is_train=False).__iter__)
+        train_ds = Dataset.from_generator(RetrievalDataset(data['train'], is_train=True).__iter__)
+        dev_ds = Dataset.from_generator(RetrievalDataset(data['dev'], is_train=False).__iter__)
 
         exp_name = 'all-mpnet-base-v2-q_ba'
 
@@ -171,7 +186,7 @@ if __name__ == '__main__':
             eval_strategy="steps",
             torch_empty_cache_steps=100,
             save_strategy="steps",
-            save_steps=args.logging_steps,
+            save_steps=args.save_steps,
             save_total_limit=2,
             load_best_model_at_end=True,
             logging_dir=f'logs/{exp_name}',
