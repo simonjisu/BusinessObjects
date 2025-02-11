@@ -17,6 +17,7 @@ from src.data_preprocess import (
     process_all_tables,
 )
 import random
+from tqdm import tqdm
 
 class RetrievalDataset():
     def __init__(self, data: dict, is_train: bool=True):
@@ -78,17 +79,17 @@ def run_parallel(func, args, num_cpus: int=1):
     pool.join()
     return results
 
-def extract_first_number_from_index(x: pd.Index):
+def extract_first_number_from_index(x: pd.Index|pd.CategoricalIndex):  
     x = x.tolist()
     x = list(map(lambda y: float(y.lstrip('(').split(',')[0]), x))
     return x
 
 def get_hard_negative_samples(df: pd.DataFrame, n_neg_each_db: int=1):
     db_ids = df['db_id'].unique()
-    samples = df.loc[:, ['sample_id', 'question', 'ba', 'gold_complexity_cates']].set_index('sample_id').to_dict('dict')  # question, ba key -- {sample_id: value}
+    samples = df.loc[:, ['sample_id', 'question', 'ba', 'gold_complexity_codes']].set_index('sample_id').to_dict('dict')  # question, ba key -- {sample_id: value}
     sample_ids = []
 
-    for db_id in db_ids:
+    for db_id in tqdm(db_ids, total=len(db_ids)):
         positive_samples = df.loc[df['db_id'] == db_id, 'sample_id'].tolist()
         for pos in positive_samples:
             negative_samples = df.loc[df['db_id'] != db_id, ['sample_id', 'db_id']].groupby(['db_id']).sample(n=n_neg_each_db)['sample_id'].tolist()
@@ -109,18 +110,22 @@ def split_train_dev_retrieval_data(train_bo_path: Path|str, frac: float=0.9, n_q
     df = pd.DataFrame(df)
     cates = pd.qcut(df['gold_complexity'], q=n_qcut)
     df['gold_complexity_cates'] = cates
-    df['gold_complexity_codes'] = cates.cat.codes
+    df['gold_complexity_codes'] = cates.cat.codes.astype(int)
 
-    distribution = df.loc[:, 'gold_complexity_cates'].value_counts().sort_index(key=extract_first_number_from_index).to_dict()
+    distributions = df.loc[:, 'gold_complexity_cates'].value_counts()
+    distributions.index = distributions.index.astype(str)
+    distributions = distributions.sort_index(key=extract_first_number_from_index).to_dict()
 
     with open(train_bo_path.parent / f'complexity_distribution.json', 'w') as f:
-        json.dump(distribution)
-        
+        json.dump(distributions, f)
+
     # split train and dev by equal complexity distribution
     df_train = df.groupby('gold_complexity_codes').sample(frac=frac, random_state=random_state)
     df_dev = df.drop(df_train.index)
 
+    print('Processing train data')
     train_data = get_hard_negative_samples(df_train, n_neg_each_db)
+    print('Processing dev data')
     dev_data = get_hard_negative_samples(df_dev, n_neg_each_db)
     # train_data, dev_data = run_parallel(get_hard_negative_samples, [(df_train, n_neg_each_db), (df_dev, n_neg_each_db)], num_cpus=num_cpus)
 
@@ -139,7 +144,8 @@ if __name__ == '__main__':
     parser.add_argument('--logging_steps', type=int, default=1, help='Logging steps')
     parser.add_argument('--save_steps', type=int, default=10, help='Save steps')
     # parser.add_argument('--n_neg_sample', type=int, default=1, help='Number of negative samples to use for training')
-    
+    # uv run train_retrieval_model.py --task retrieval --ds bird --per_device_train_batch_size 256 --per_device_eval_batch_size 128 --logging_steps 1 --save_steps 10
+
     args = parser.parse_args()
     proj_path = Path('.').resolve()
     description_file = f'description.json' if args.ds == 'spider' else f'{args.ds}_description.json'
