@@ -18,12 +18,12 @@ from transformers import logging as tfloggings
 tfloggings.set_verbosity_error()
 from itertools import product, pairwise
 
-import spacy
-try:
-    NLP_SPACY = spacy.load('en_core_web_md')
-except OSError:
-    from spacy.cli import download
-    download('en_core_web_md')
+# import spacy
+# try:
+#     NLP_SPACY = spacy.load('en_core_web_md')
+# except OSError:
+#     from spacy.cli import download
+#     download('en_core_web_md')
 
 from bert_score import score as bscore
 from src.database import SqliteDatabase
@@ -166,6 +166,13 @@ def get_structural_score(
     *_, final_score = partial_matching_with_penalty(matrix, penalty, maximize)
     return final_score
 
+def stringify_asts(source_asts, target_asts):
+    source_str = [str(ast) for ast in source_asts]
+    target_str = [str(ast) for ast in target_asts]
+    # source_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in source_asts]
+    # target_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in target_asts]
+    return source_str, target_str
+
 def get_semantic_score(
         source: list[exp.Expression],
         target: list[exp.Expression],
@@ -175,8 +182,9 @@ def get_semantic_score(
     ) -> float:
     n = len(source)
     m = len(target)
-    source_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in source]
-    target_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in target]
+    source_str, target_str = stringify_asts(source, target)
+    # source_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in source]
+    # target_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in target]
     
     if use_bert:
         source_str_list, target_str_list = list(zip(*product(source_str, target_str)))
@@ -261,11 +269,7 @@ def get_all_semantic_score(
         criteria: str='tsed',
     ):
     args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
-    def stringify(source_asts, target_asts):
-        source_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in source_asts]
-        target_str = [str(ast) if use_bert else NLP_SPACY(str(ast)) for ast in target_asts]
-        return list(zip(source_str, target_str))
-    
+
     all_pairs = []
     all_idxes = defaultdict(dict)
     all_results = defaultdict(dict)
@@ -283,7 +287,8 @@ def get_all_semantic_score(
                 if arg in ['sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'table_asts']:
                     source = [ast for _, ast, _ in source_output[arg]]
                     target = [ast for _, ast, _ in target_output[arg]]
-                    pairs = stringify(source, target)
+                    source_str, target_str = stringify_asts(source, target)
+                    pairs = list(zip(source_str, target_str))
                     idxes = list(range(len(all_pairs), len(all_pairs)+len(pairs)))
                     all_pairs.extend(pairs)
                     all_idxes[k][arg] = idxes
@@ -291,7 +296,8 @@ def get_all_semantic_score(
                 elif arg == 'subqueries':
                     source = source_output[arg][1:]
                     target = target_output[arg][1:]
-                    pairs = stringify(source, target)
+                    source_str, target_str = stringify_asts(source, target)
+                    pairs = list(zip(source_str, target_str))
                     idxes = list(range(len(all_pairs), len(all_pairs)+len(pairs)))
                     all_pairs.extend(pairs)
                     all_idxes[k][arg] = idxes
@@ -446,9 +452,9 @@ def get_complexity(output):
         if output[arg]:
             if arg == 'nested':
                 complexity = output[arg]
-            elif arg == 'table_asts':
+            if arg == 'table_asts':
                 complexity = len(output[arg])
-            else:
+            if arg in ('distinct', 'limit') and output[arg]:
                 complexity = int(output[arg])
             total_complexity.append(complexity)
     return int(sum(total_complexity))

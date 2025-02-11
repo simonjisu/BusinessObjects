@@ -17,7 +17,7 @@ dependencies = [
     "python-dotenv>=1.0.1",
     "scikit-learn>=1.5.2",
     "seaborn>=0.13.2",
-    "sentence-transformers>=3.1.0",
+    "sentence-transformers[train]>=3.1.0",
     "sentencepiece>=0.2.0",
     "sqlglot[rs]>=25.20.1",
     "sqlparse>=0.5.1",
@@ -36,4 +36,6 @@ dependencies = [
     "zss>=1.2.0",
     "apted>=1.0.3",
     "bert-score>=0.3.13",
+    "func-timeout>=4.3.5",
+    "tensorboard>=2.18.0",
 ]

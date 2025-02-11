@@ -98,6 +98,17 @@ def _get_categories(s: pd.Series):
         tiles = [0, 0.2, 0.4, 0.6, 0.8, 1]
         return pd.qcut(s, q=tiles, duplicates='drop')
 
+def _get_categories_with_same_name(s: pd.Series):
+    if s.nunique() == 1:
+        s = pd.qcut(s, q=[0, 1], duplicates='drop')
+        s = s.map({s.cat.categories[i]: str(i) for i in range(len(s.cat.categories))})
+        return s
+    else:
+        tiles = [0, 0.2, 0.4, 0.6, 0.8, 1]
+        s = pd.qcut(s, q=tiles, duplicates='drop')
+        s = s.map({s.cat.categories[i]: str(i) for i in range(len(s.cat.categories))})
+        return s
+
 def _get_df_from_bos(bos):
     df = []
     for db_id, bs in bos.items():

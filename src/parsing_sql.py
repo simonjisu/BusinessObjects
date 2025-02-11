@@ -1082,6 +1082,5 @@ if __name__ == "__main__":
         'district_id': 'text'}})
     
     sql1 = "SELECT * FROM client WHERE age > 30"
-    parsed_query = sqlglot.parse_one(sql1)
-    results = extract_all(parsed_query, schema)
+    results = extract_all(sql1, schema)
     

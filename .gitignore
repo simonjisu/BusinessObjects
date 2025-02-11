@@ -170,3 +170,4 @@ data/pkl_files/
 *.zip
 .vscode/*
 cache/*
+mini_dev/*
