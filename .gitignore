@@ -171,3 +171,4 @@ data/pkl_files/
 .vscode/*
 cache/*
 mini_dev/*
+logs/*
