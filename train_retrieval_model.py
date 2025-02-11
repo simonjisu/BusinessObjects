@@ -143,7 +143,7 @@ if __name__ == '__main__':
     parser.add_argument('--per_device_eval_batch_size', type=int, default=128, help='Batch size')
     parser.add_argument('--logging_steps', type=int, default=1, help='Logging steps')
     parser.add_argument('--save_steps', type=int, default=10, help='Save steps')
-    # parser.add_argument('--n_neg_sample', type=int, default=1, help='Number of negative samples to use for training')
+    parser.add_argument('--eval_steps', type=int, default=10, help='Eval steps')
     # uv run train_retrieval_model.py --task retrieval --ds bird --per_device_train_batch_size 256 --per_device_eval_batch_size 128 --logging_steps 1 --save_steps 10
 
     args = parser.parse_args()
@@ -190,6 +190,7 @@ if __name__ == '__main__':
             logging_steps=args.logging_steps,
             batch_sampler=BatchSamplers.NO_DUPLICATES,
             eval_strategy="steps",
+            eval_steps=args.eval_steps,
             torch_empty_cache_steps=100,
             save_strategy="steps",
             save_steps=args.save_steps,
