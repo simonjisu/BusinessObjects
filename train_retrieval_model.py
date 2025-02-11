@@ -19,10 +19,11 @@ from src.data_preprocess import (
 import random
 
 class RetrievalDataset():
-    def __init__(self, data: dict, is_train: bool=True):
+    def __init__(self, data: dict, n_neg_sample: int=5, is_train: bool=True):
         self.is_train = is_train
+        self.n_neg_sample = n_neg_sample
         self.samples = self._map_samples_key_to_int(data['samples'])
-        self.sample_ids = self._align_sample_ids(data['sample_ids'], is_train)
+        self.sample_ids = self._align_sample_ids(data['sample_ids'], n_neg_sample, is_train)
         
     def __len__(self):
         return len(self.sample_ids)
@@ -32,7 +33,7 @@ class RetrievalDataset():
         samples['ba'] = {int(k): v for k, v in samples['ba'].items()}
         return samples
 
-    def _align_sample_ids(self, sample_ids: list[dict[str, int|list[int]]], is_train: bool):
+    def _align_sample_ids(self, sample_ids: list[dict[str, int|list[int]]], n_neg_sample: int, is_train: bool):
         # {'pos: pos, 'neg': [neg1, neg2, ...]}
         # -> list of [pos, neg] to make (anchor, positive, negative)
         flatten_sample_ids = []
@@ -40,10 +41,11 @@ class RetrievalDataset():
             pos_id = int(x['pos'])
             neg_ids = [int(i) for i in x['neg']]
             if is_train:
-                flatten_sample_ids.append({'pos': pos_id, 'neg': random.choice(neg_ids)})
-            else:
-                for neg_id in neg_ids:
-                    flatten_sample_ids.append({'pos': pos_id, 'neg': neg_id})
+                random.shuffle(neg_ids)
+                neg_ids = neg_ids[:n_neg_sample]
+            
+            for neg_id in neg_ids:
+                flatten_sample_ids.append({'pos': pos_id, 'neg': neg_id})
 
         return flatten_sample_ids
         
@@ -121,6 +123,7 @@ if __name__ == '__main__':
     parser.add_argument('--per_device_train_batch_size', type=int, default=256, help='Batch size')
     parser.add_argument('--per_device_eval_batch_size', type=int, default=128, help='Batch size')
     parser.add_argument('--logging_steps', type=int, default=10, help='Logging steps')
+    parser.add_argument('--n_neg_sample', type=int, default=1, help='Number of negative samples to use for training')
     
     args = parser.parse_args()
     proj_path = Path('.').resolve()
@@ -151,8 +154,8 @@ if __name__ == '__main__':
 
         model = SentenceTransformer('all-mpnet-base-v2')
 
-        train_ds = Dataset.from_generator(RetrievalDataset(data['train'], is_train=True).__iter__)
-        dev_ds = Dataset.from_generator(RetrievalDataset(data['dev'], is_train=False).__iter__)
+        train_ds = Dataset.from_generator(RetrievalDataset(data['train'], args.n_neg_sample, is_train=True).__iter__)
+        dev_ds = Dataset.from_generator(RetrievalDataset(data['dev'], args.n_neg_sample, is_train=False).__iter__)
 
         exp_name = 'all-mpnet-base-v2-q_ba'
 
