@@ -19,9 +19,10 @@ from src.data_preprocess import (
 import random
 
 class RetrievalDataset():
-    def __init__(self, data: dict):
+    def __init__(self, data: dict, is_train: bool=True):
         self.samples = self._map_samples_key_to_int(data['samples'])
         self.sample_ids = self._align_sample_ids(data['sample_ids'])
+        self.is_train = is_train
         
     def __len__(self):
         return len(self.sample_ids)
@@ -38,9 +39,12 @@ class RetrievalDataset():
         for x in sample_ids:
             pos_id = int(x['pos'])
             neg_ids = [int(i) for i in x['neg']]
-            # for neg_id in neg_ids:
-            #     flatten_sample_ids.append({'pos': pos_id, 'neg': neg_id})
-            flatten_sample_ids.append({'pos': pos_id, 'neg': random.choice(neg_ids)})
+            if self.is_train:
+                flatten_sample_ids.append({'pos': pos_id, 'neg': random.choice(neg_ids)})
+            else:
+                for neg_id in neg_ids:
+                    flatten_sample_ids.append({'pos': pos_id, 'neg': neg_id})
+
         return flatten_sample_ids
         
     def __getitem__(self, idx):
@@ -114,7 +118,7 @@ if __name__ == '__main__':
     parser.add_argument('--num_cpus', type=int, default=1, help='Number of cpus to use for parallel processing')
     parser.add_argument('--num_train_epochs', type=int, default=3, help='Number of training epochs')
     parser.add_argument('--learning_rate', type=float, default=2e-5, help='Learning rate')
-    parser.add_argument('--per_device_train_batch_size', type=int, default=64, help='Batch size')
+    parser.add_argument('--per_device_train_batch_size', type=int, default=256, help='Batch size')
     parser.add_argument('--per_device_eval_batch_size', type=int, default=128, help='Batch size')
     parser.add_argument('--logging_steps', type=int, default=10, help='Logging steps')
     
@@ -164,7 +168,7 @@ if __name__ == '__main__':
             eval_strategy="steps",
             torch_empty_cache_steps=100,
             save_strategy="steps",
-            save_steps=100,
+            save_steps=args.logging_steps,
             save_total_limit=2,
             load_best_model_at_end=True,
             logging_dir=f'logs/{exp_name}',
