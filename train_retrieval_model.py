@@ -151,8 +151,8 @@ if __name__ == '__main__':
 
         model = SentenceTransformer('all-mpnet-base-v2')
 
-        train_ds = Dataset.from_generator(RetrievalDataset(data['train']).__iter__)
-        dev_ds = Dataset.from_generator(RetrievalDataset(data['dev']).__iter__)
+        train_ds = Dataset.from_generator(RetrievalDataset(data['train'], is_train=True).__iter__)
+        dev_ds = Dataset.from_generator(RetrievalDataset(data['dev'], is_train=False).__iter__)
 
         exp_name = 'all-mpnet-base-v2-q_ba'
 
