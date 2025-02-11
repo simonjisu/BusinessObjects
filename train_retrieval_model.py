@@ -37,10 +37,10 @@ class RetrievalDataset():
         flatten_sample_ids = []
         for x in sample_ids:
             pos_id = int(x['pos'])
-            neg_ids = random.choice([int(i) for i in x['neg']])
-            for neg_id in neg_ids:
-                flatten_sample_ids.append({'pos': pos_id, 'neg': neg_id})
-
+            neg_ids = [int(i) for i in x['neg']]
+            # for neg_id in neg_ids:
+            #     flatten_sample_ids.append({'pos': pos_id, 'neg': neg_id})
+            flatten_sample_ids.append({'pos': pos_id, 'neg': random.choice(neg_ids)})
         return flatten_sample_ids
         
     def __getitem__(self, idx):
