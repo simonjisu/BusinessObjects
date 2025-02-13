@@ -172,3 +172,4 @@ data/pkl_files/
 cache/*
 mini_dev/*
 logs/*
+models/*
