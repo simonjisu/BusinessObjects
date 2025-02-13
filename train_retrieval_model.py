@@ -728,9 +728,9 @@ if __name__ == '__main__':
             dev_dataset.load_samples(dev_path)
 
         base_model_name = 'cross-encoder/ms-marco-MiniLM-L-6-v2'
-        model = CrossEncoder(args.base_model_name, num_labels=1)
+        model = CrossEncoder(base_model_name, num_labels=1)
 
-        exp_name = f'{args.base_model_name.split("/")[-1]}-q_ba-rerank'
+        exp_name = f'{base_model_name.split("/")[-1]}-q_ba-rerank'
 
         train_samples = train_dataset.get_rerank_samples()
         train_loader = DataLoader(
