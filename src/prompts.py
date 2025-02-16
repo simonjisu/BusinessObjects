@@ -42,6 +42,38 @@ Your output should be of the following JSON format:
 <INPUT QUERY>: {input_query}
 <OUTPUT>: 
 '''
+    gen_template = '''### TASK
+You are tasked with generating a SQL query template(in a SQLite Database) according to a user input NL question.
+You should work in step-by-step reasoning before coming to the full SQL query.
+
+### SCHEMA
+You are working with the following schema in a SQLite Database:
+{schema}
+
+### SQL QUERY TEMPLATE
+All the values in the SQL query should be replaced with the following placeholders:
+- `[PLACEHOLDER-TYPE:STRING]` for string values
+- `[PLACEHOLDER-TYPE:NUMBER]` for numeric values
+
+### HINT
+You will be provided a hint to help you. 
+(1) "virtual table": a query template the might be relevant to the user's question.
+(2) "description": a natural language description of the virtual table.
+You can use or modify the hint to generate the query template or not to use.
+
+### FORMATTING
+Your output should be of the following JSON format:
+{{
+    "rationale": "<list[str]: the step-by-step reasoning to generate the SQL query template>",
+    "sql": "<str: the SQL query template>",
+    "hint_used": "<bool: whether you used the hint or not>"
+}}
+
+### OUTPUT
+<INPUT QUERY>: {input_query}
+<HINT>: {hint}
+<OUTPUT>: 
+'''
     zero_shot_hints_inference = '''### TASK
 You are tasked with generating a SQL query(in a SQLite Database) according to a user input NL question.
 You should work in step-by-step reasoning before coming to the full SQL query.

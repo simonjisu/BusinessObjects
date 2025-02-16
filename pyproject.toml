@@ -38,4 +38,5 @@ dependencies = [
     "bert-score>=0.3.13",
     "func-timeout>=4.3.5",
     "tensorboard>=2.18.0",
+    "langchain-huggingface>=0.1.2",
 ]

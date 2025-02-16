@@ -160,7 +160,6 @@ cython_debug/
 #.idea/
 *.pkl
 .gcp/*
-experiments/*
 data/bird
 data/sparc
 data/tpch/tpch.db
@@ -173,3 +172,4 @@ cache/*
 mini_dev/*
 logs/*
 models/*
+x-*

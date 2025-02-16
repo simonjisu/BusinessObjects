@@ -244,6 +244,7 @@ dependencies = [
     { name = "langchain" },
     { name = "langchain-community" },
     { name = "langchain-google-genai" },
+    { name = "langchain-huggingface" },
     { name = "langchain-ollama" },
     { name = "langchain-openai" },
     { name = "matplotlib" },
@@ -281,6 +282,7 @@ requires-dist = [
     { name = "langchain", specifier = ">=0.3.1" },
     { name = "langchain-community", specifier = ">=0.3.1" },
     { name = "langchain-google-genai", specifier = "==2.0.0" },
+    { name = "langchain-huggingface", specifier = ">=0.1.2" },
     { name = "langchain-ollama", specifier = ">=0.2.0" },
     { name = "langchain-openai", specifier = ">=0.1.23" },
     { name = "matplotlib", specifier = ">=3.9.2" },
@@ -1361,7 +1363,7 @@ wheels = [
 
 [[package]]
 name = "langchain-core"
-version = "0.3.6"
+version = "0.3.35"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "jsonpatch" },
@@ -1372,9 +1374,9 @@ dependencies = [
     { name = "tenacity" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/08/0e/fa5137d090dff446fa9b1d617a76d91daa3aa2efa099aacd2fdc94494711/langchain_core-0.3.6.tar.gz", hash = "sha256:eb190494a5483f1965f693bb2085edb523370b20fc52dc294d3bd425773cd076", size = 320190 }
+sdist = { url = "https://files.pythonhosted.org/packages/56/5c/5ed0aa88d0ffc52634b97dcd971d675cfc55072b28f7723bba2ef9432bad/langchain_core-0.3.35.tar.gz", hash = "sha256:328688228ece259da734417d477994a69cf8202dea9ed4271f2d792e3575c6fc", size = 525736 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3e/0b/f189d87ccc7a5f388649bbf7e513ad774b14d66a4bb96278cb211347a17c/langchain_core-0.3.6-py3-none-any.whl", hash = "sha256:7bb3df0117bdc628b18b6c8748de72c6f537d745d47566053ce6650d5712281c", size = 399888 },
+    { url = "https://files.pythonhosted.org/packages/94/63/be67b8ab4f4cf07b8da65a67ff72ea870ec8cf9f2e95e3a5b837a5604d1b/langchain_core-0.3.35-py3-none-any.whl", hash = "sha256:81a4097226e180fa6c64e2d2ab38dcacbbc23b64fc109fb15622910fe8951670", size = 413151 },
 ]
 
 [[package]]
@@ -1389,6 +1391,22 @@ dependencies = [
 sdist = { url = "https://files.pythonhosted.org/packages/de/11/0f746d9710f129d891b8f341619dda41e9af17775f85c5ee91fb5572640f/langchain_google_genai-2.0.0.tar.gz", hash = "sha256:50c9381a01073bba5eeddfe229d35bbf9e9c9f593f7413f2aa0cb6b44a861ac0", size = 35298 }
 wheels = [
     { url = "https://files.pythonhosted.org/packages/cc/55/713046838839ff9636a98d3a941e9b840a00823794f5d3c627cbd6404a00/langchain_google_genai-2.0.0-py3-none-any.whl", hash = "sha256:2cfa264837d1a6382d60a34588aee26a494b1904d39843b29312abde6226efd2", size = 39525 },
+]
+
+[[package]]
+name = "langchain-huggingface"
+version = "0.1.2"
+source = { registry = "https://pypi.org/simple" }
+dependencies = [
+    { name = "huggingface-hub" },
+    { name = "langchain-core" },
+    { name = "sentence-transformers" },
+    { name = "tokenizers" },
+    { name = "transformers" },
+]
+sdist = { url = "https://files.pythonhosted.org/packages/a1/0f/8277d993d5307f06523e72c9bc8a505ed028f7b1c1e5276d8e89044b6036/langchain_huggingface-0.1.2.tar.gz", hash = "sha256:4a66d5c449298fd353bd84c9ed01f9bf4303bf2e4ffce14aab8c55c584eee57c", size = 16129 }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/9d/f8/77a303ddc492f6eed8bf0979f2bc6db4fa6eb1089c5e9f0f977dd87bc9c2/langchain_huggingface-0.1.2-py3-none-any.whl", hash = "sha256:7de5cfcae32bfb6a99c084fc16176f02583a4f8d94febb6bb45bed5b34699174", size = 21251 },
 ]
 
 [[package]]

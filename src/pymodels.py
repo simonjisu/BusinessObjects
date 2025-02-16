@@ -5,8 +5,13 @@ class Description(BaseModel):
     output: dict[str, dict[str, dict[str, str]]] = Field(description='Description of each column for all tables in the database')
 
 class SQLResponse(BaseModel):
-    full_sql_query: str = Field(description='The full SQL query.')
+    sql: str = Field(description='The full SQL query.')
     rationale: list[str] = Field(description='The step-by-step reasoning to generate the SQL query. ')
+
+class GenTemplateResponse(BaseModel):
+    sql: str = Field(description='The SQL query template.')
+    rationale: list[str] = Field(description='The step-by-step reasoning to generate the SQL query template. ')
+    hint_used: bool = Field(description='Whether you used the hint or not.')
 
 class BODescription(BaseModel):
     description: str = Field(description='The a clear and concise summary of the complex data model.')

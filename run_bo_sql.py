@@ -19,12 +19,22 @@ from langchain_core.prompts import PromptTemplate
 from langchain.retrievers import ContextualCompressionRetriever
 from langchain.retrievers.document_compressors import CrossEncoderReranker
 from langchain_community.cross_encoders import HuggingFaceCrossEncoder
+from langchain_huggingface import HuggingFaceEmbeddings
+from langchain_core.embeddings import Embeddings
+
 from langchain_community.callbacks.manager import get_openai_callback
 from langchain.globals import set_llm_cache
 from langchain_community.cache import SQLiteCache
 
 from src.prompts import Prompts
-from src.pymodels import SQLResponse, DatabaseModel, BirdSample, SpiderSample, BODescription
+from src.pymodels import (
+    SQLResponse, 
+    GenTemplateResponse, 
+    DatabaseModel, 
+    BirdSample, 
+    SpiderSample,
+    BODescription
+)
 from src.db_utils import get_schema_str
 from src.data_preprocess import process_all_tables, load_raw_data, load_samples_spider_bird
 from src.database import SqliteDatabase
@@ -174,7 +184,25 @@ def create_vt_ba(
         with (prediction_path / f'{file_name}_{db_id}.json').open('w') as f:
             json.dump(results, f, indent=4)
 
-def get_vector_store(bos: dict[str, list[dict[str, str]]], is_question_query: bool=False) -> FAISS:
+def remove_duplicate_bos(
+        bos: dict[str, list[dict[str, str]]]
+    ) -> dict[str, list[dict[str, str]]]:
+    hash_map = defaultdict(set)
+    for db_id, xs in bos.items():
+        for x in xs:
+            hash_map[x['vt']].add(x['sample_id'])
+
+    ids = list(map(lambda x: list(x)[0], hash_map.values()))
+    new_bos = {}
+    for db_id, xs in bos.items():
+        new_bos[db_id] = [x for x in xs if x['sample_id'] in ids]
+
+    return new_bos
+
+def get_vector_store(
+        bos: dict[str, list[dict[str, str]]], 
+        embeddings_model: Embeddings,
+        is_question_query: bool=False) -> FAISS:
     documents = []
     for db_id, samples in bos.items():
         for x in samples:
@@ -183,11 +211,11 @@ def get_vector_store(bos: dict[str, list[dict[str, str]]], is_question_query: bo
                 metadata={
                     'sample_id': x['sample_id'],
                     'db_id': db_id,
-                    'vt': x['vt']
+                    'vt': x['vt'],
+                    'complexity': x['gold_complexity']
                 }
             )
             documents.append(doc)
-    embeddings_model = OpenAIEmbeddings()
     vector_store = FAISS.from_documents(
         documents, 
         embedding = embeddings_model,
@@ -200,15 +228,13 @@ def get_retriever(
         cross_encoder: HuggingFaceCrossEncoder=None,
         n_retrieval: int = 3,
         k_retrieval: int = 10,
-        score_threshold: float = 0.60,
         use_reranker: bool = False
     ) -> BaseRetriever:
     k_retrieval = k_retrieval if use_reranker else n_retrieval
     base_retriever = vectorstore.as_retriever(
-        search_type='similarity_score_threshold',
+        search_type='similarity',
         search_kwargs={
             'k': k_retrieval, 
-            'score_threshold': score_threshold, 
             'filter': {'db_id': db_id},
         }
     )
@@ -220,6 +246,163 @@ def get_retriever(
     else:
         retriever = base_retriever
     return retriever
+
+def task_retrieve(
+        samples: list[SpiderSample|BirdSample],
+        bos: dict[str, list[dict[str, str]]],
+        prediction_path: Path,
+        embedding_model: str = 'openai',
+        reranker_model: str = 'msmarco',
+        prefix: str = 'x-',
+        k_retrieval: int = 5,
+        n_retrieval: int = 1,
+        use_reranker: bool = False,
+        is_question_query: bool = False,
+        is_test: bool = False
+    ):
+    if embedding_model == 'openai':
+        embedder = OpenAIEmbeddings()
+    elif embedding_model == 'custom':
+        embedder = HuggingFaceEmbeddings(model_name='./models/msmarco-MiniLM-L6-cos-v5-q_ba')
+    else:
+        raise KeyError('Invalid embedding model for `embedding_model`, either `openai` or `custom`')
+    if reranker_model == 'msmarco':
+        cross_encoder = HuggingFaceCrossEncoder(model_name='cross-encoder/ms-marco-MiniLM-L-6-v2')
+    elif reranker_model == 'custom':
+        cross_encoder = HuggingFaceCrossEncoder(model_name='./models/ms-marco-MiniLM-L-6-v2-q_ba-rerank')
+    else:
+        raise KeyError('Invalid embedding model for `reranker_model`, either `msmarco` or `custom`')
+    
+    # filename pattern [prefix]-[db_id].json
+    processed_db_ids = [p.stem.split('-')[1] for p in prediction_path.glob(f'{prefix}*.json')]
+    if processed_db_ids:
+        bos = dict([(db_id, bo_list) for db_id, bo_list in bos.items() if db_id not in processed_db_ids])
+        print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}...')
+
+    samples_by_db_id = defaultdict(list)
+    for sample in samples:
+        samples_by_db_id[sample.db_id].append(sample)
+
+    for db_id, samples in samples_by_db_id.items():
+        vector_store = get_vector_store(
+            bos=bos, 
+            embeddings_model=embedder, 
+            is_question_query=is_question_query)
+        retriever = get_retriever(
+            vectorstore=vector_store,
+            db_id=db_id,
+            cross_encoder=cross_encoder,
+            n_retrieval=n_retrieval,
+            k_retrieval=k_retrieval,
+            use_reranker=use_reranker,
+        )
+
+        x_samples = list(filter(lambda x: x.db_id == db_id, samples))
+        iterator = tqdm(x_samples, total=len(x_samples), desc=f"{db_id}")
+        results = []
+        for sample in iterator:
+            question = sample.final.question
+            docs = retriever.invoke(question)
+            doc_ids = [doc.metadata['sample_id'] for doc in docs]
+            res = {
+                'db_id': db_id,
+                'sample_id': sample.sample_id,
+                'retrieved': doc_ids,
+            }
+            results.append(res)
+        
+        with open(prediction_path / f'{prefix}{db_id}.json', 'w') as f:
+            json.dump(results, f)
+
+    file_name = 'retrieval_test.json' if is_test else 'retrieval_dev.json'
+    with open(prediction_path / file_name, 'w') as file:
+        all_results = []
+        for p in prediction_path.glob(f'{prefix}*.json'):
+            with p.open() as f:
+                temp = json.load(f)
+            all_results.extend(temp)
+        json.dump(all_results, file, indent=4)
+
+def task_gen_template(
+        samples: list[SpiderSample|BirdSample],
+        tables: dict[DatabaseModel],
+        bos: dict[str, list[dict[str, str]]],
+        retrieved: dict[str, int|list[int]],
+        chain: RunnableSequence,
+        prediction_path: Path,
+        prefix: str = 'x-',
+        is_test: bool = False
+    ):
+    pass
+    # filename pattern [prefix]-[db_id].json
+    processed_db_ids = [p.stem.split('-')[1] for p in prediction_path.glob(f'{prefix}*.json')]
+    if processed_db_ids:
+        samples = [sample for sample in samples if sample.db_id not in processed_db_ids]
+        print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}')
+
+    retrieved_by_db_id = defaultdict(dict)
+    empty_sample_ids = []
+    for sample in retrieved:
+        if len(sample['retrieved']) == 0:
+            empty_sample_ids.append(sample['sample_id'])
+        else:
+            db_id = sample['db_id']
+            sample_id = sample['sample_id']
+            
+            retrieved_by_db_id[db_id][sample_id] = sample['retrieved']
+
+    # filter empty retrieved samples
+    samples = list(filter(lambda x: x.sample_id not in empty_sample_ids, samples))
+
+    samples_by_db_id = defaultdict(list)
+    for sample in samples:
+        samples_by_db_id[sample.db_id].append(sample)
+
+    for db_id, samples in samples_by_db_id.items():
+        set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{db_id}.db"))
+        schema_str = get_schema_str(
+            schema=tables[db_id].db_schema, 
+            foreign_keys=tables[db_id].foreign_keys,
+            col_explanation=tables[db_id].col_explanation
+        )
+        id2bo = {} 
+        for x in bos[db_id]:
+            id2bo[x['sample_id']] = x
+
+        results = []
+        for sample in tqdm(samples, total=len(samples), desc=f"{db_id}"):
+            question = sample.final.question
+            doc_ids = retrieved_by_db_id[db_id][sample.sample_id]
+            docs = [{'descrption': id2bo[doc_id]['ba'], 
+                     'virtual_table': id2bo[doc_id]['vt']} for doc_id in doc_ids]
+            
+            hint = '\nDescriptions and Virtual Tables:\n'
+            hint += json.dumps({j: doc for j, doc in enumerate(docs)}, indent=4)
+            hint += '\n'
+            input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
+    
+            with get_openai_callback() as cb:
+                output: GenTemplateResponse = chain.invoke(input=input_data)
+            
+            res = {}
+            res['sample_id'] = sample.sample_id
+            res['rationale'] = output.rationale
+            res['sql_template'] = output.sql
+            res['hint_used'] = output.hint_used
+            res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
+            results.append(res)
+
+        with open(prediction_path / f'{prefix}{db_id}.json', 'w') as f:
+            json.dump(results, f, indent=4)
+    
+    file_name = 'gen_template_test.json' if is_test else 'gen_template_dev.json'
+    with open(prediction_path / file_name, 'w') as file:
+        all_results = []
+        for p in prediction_path.glob(f'{prefix}*.json'):
+            with p.open() as f:
+                temp = json.load(f)
+            all_results.extend(temp)
+        json.dump(all_results, file, indent=4)
 
 def valid_bo(
         samples: list[SpiderSample|BirdSample],
@@ -267,7 +450,7 @@ def valid_bo(
 
             res.update({
                 'rationale': output.rationale,
-                'pred_sql': output.full_sql_query,
+                'pred_sql': output.sql,
                 'token_usage': {'tokens': cb.total_tokens, 'cost': cb.total_cost}
             })
             results.append(res)
@@ -333,7 +516,7 @@ def predict_sql_bo(
             res = {}
             res['sample_id'] = sample.sample_id
             res['rationale'] = output.rationale
-            res['pred_sql'] = output.full_sql_query
+            res['pred_sql'] = output.sql
             res['retrieved'] = [doc.metadata['sample_id'] for doc in docs]
             res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
             results.append(res)
@@ -343,20 +526,27 @@ def predict_sql_bo(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Zero-shot SQL generation with OpenAI')
-    parser.add_argument('--task', type=str, default='zero_shot_hint', help='`create_bo`, `zero_shot_hint`, `bo_eval`')
+    parser.add_argument('--task', type=str, default='zero_shot_hint', help='`create_bo`, `retrieve`, `gen_template`, `fill_in`, `evaluate`')
     parser.add_argument('--ds', type=str, default='spider', help='Dataset to use for training. spider or bird') 
     parser.add_argument('--type', type=str, default='train', help='Type of data to use for .')
     parser.add_argument('--description_file', type=str, default='description.json', help='File containing the descriptions.')
     parser.add_argument('--k_retrieval', type=int, default=5, help='Number of retrievals for reranker to consider')
     parser.add_argument('--n_retrieval', type=int, default=1, help='Number of retrievals to consider')
-    parser.add_argument('--n_sample', type=int, default=3, help='[type=dev] Number of samples to consider')
-    parser.add_argument('--n_stop', type=int, default=50, help='[type=dev] Number of samples to stop')
-    parser.add_argument('--score_threshold', type=float, default=0.60, help='Score threshold for retrieval')
+    # parser.add_argument('--n_sample', type=int, default=3, help='[type=dev] Number of samples to consider')
+    # parser.add_argument('--n_stop', type=int, default=50, help='[type=dev] Number of samples to stop')
+    # parser.add_argument('--score_threshold', type=float, default=0.60, help='Score threshold for retrieval')
     parser.add_argument('--use_reranker', action='store_true', help='Whether to use reranker or not')
+    parser.add_argument('--embedding_model', type=str, default='openai', 
+                        help='`openai`, `custom`(`msmarco-MiniLM-L6-cos-v5-q_ba`)')
+    parser.add_argument('--reranker_model', type=str, default='cross-encoder/ms-marco-MiniLM-L-6-v2',
+                        help='Reranker model to use: `msmarco`(`cross-encoder/ms-marco-MiniLM-L-6-v2`), `custom`(ms-marco-MiniLM-L-6-v2-q_ba-rerank)')
+    parser.add_argument('--is_question_query', action='store_true', help='Whether to use question query or not')
+    
     # valid_bo
     parser.add_argument('--db_id_group', type=int, default=-1, help='Group of db_ids to consider, < 0 means use all')
     # test_bo
     parser.add_argument('--scenario', type=int, default='0', help='Scenario to consider')
+
     # scenario
     # (ba-query) 0: 10 | 1: 15 | 2: 25 | (question-query) 4: 25
     
@@ -408,6 +598,62 @@ if __name__ == '__main__':
         with (prediction_path / f'final_{args.ds}_{args.type}_bo.json').open('w') as f:
             json.dump(bos, f, indent=4)
 
+    elif args.task == 'retrieve':
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+
+        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+        assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+        with bo_path.open() as f:
+            bos = json.load(f)
+        bos = remove_duplicate_bos(bos)
+
+        task_retrieve(
+            samples=samples,
+            bos=bos,
+            prediction_path=prediction_path,
+            embedding_model=args.embedding_model,
+            reranker_model=args.reranker_model,
+            prefix='x-',
+            k_retrieval=args.k_retrieval,
+            n_retrieval=args.n_retrieval,
+            use_reranker=args.use_reranker,
+            is_question_query=args.is_question_query,
+            is_test=False if args.type == 'dev' else True
+        )
+
+    elif args.task == 'gen_template':
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+
+        bo_path: Path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+        assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+        with bo_path.open() as f:
+            bos = json.load(f)
+        bos = remove_duplicate_bos(bos)
+
+        retrieval_path: Path = experiment_folder / 'predictions' / 'retrieve' / f'retrieval_{args.type}.json'
+        assert retrieval_path.exists(), f'Run with the `task=retrieve, type={args.task}` first'
+        with retrieval_path.open() as f:
+            retrieved = json.load(f)
+
+        prompt = PromptTemplate(
+            template=Prompts.gen_template,
+            input_variables=['schema', 'input_query', 'hint'],
+        )
+
+        model = model_openai.with_structured_output(GenTemplateResponse)
+        chain = (prompt | model)
+
+        task_gen_template(
+            samples=samples,
+            tables=tables,
+            bos=bos,
+            retrieved=retrieved,
+            chain=chain,
+            prediction_path=prediction_path,
+            prefix='x-',
+            is_test=False if args.type == 'dev' else True
+        )
+
     elif args.task == 'valid_bo_prepare_batch_run':
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
         df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'bird_dev.csv')
@@ -423,6 +669,8 @@ if __name__ == '__main__':
         assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
         with bo_path.open() as f:
             bos = json.load(f)
+
+        bos = remove_duplicate_bos(bos)
 
         with open(experiment_folder / f'partial_{args.ds}_db_ids.json', 'w') as f:
             json.dump(partial_db_ids, f, indent=4)
@@ -458,6 +706,7 @@ if __name__ == '__main__':
         assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
         with bo_path.open() as f:
             bos = json.load(f)
+        bos = remove_duplicate_bos(bos)
 
         batch_file_path = experiment_folder / f'partial_{args.ds}_batch.json'
         # assert batch_file_path.exists(), 'Run with the `task=create_bo, type=train` first'

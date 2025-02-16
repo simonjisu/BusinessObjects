@@ -622,7 +622,7 @@ if __name__ == '__main__':
 
     experiment_folder = proj_path / 'experiments' / args.ds
 
-    eval_path = experiment_folder / 'evals' / args.task
+    # eval_path = experiment_folder / 'evals' / args.task
     prediction_path = experiment_folder / 'predictions' / args.task
 
     tables, *_ = load_raw_data(proj_path / 'data' / args.ds, load_test=False)
@@ -668,7 +668,7 @@ if __name__ == '__main__':
         exp_name = f'{base_model_name.split("/")[-1]}-q_ba'
 
         args = SentenceTransformerTrainingArguments(
-            output_dir=f'models/{exp_name}',
+            output_dir=f'models/{args.ds}/{exp_name}',
             num_train_epochs=args.num_train_epochs,
             learning_rate=args.learning_rate,
             per_device_train_batch_size=args.per_device_train_batch_size,
@@ -747,8 +747,8 @@ if __name__ == '__main__':
             epochs=args.num_train_epochs,
             evaluation_steps=args.eval_steps,
             warmup_steps=warmup_steps,
-            output_path=f'logs/{exp_name}',
+            output_path=f'logs/{args.ds}/{exp_name}',
             use_amp=False,
         )
 
-        model.save(f'models/{exp_name}')
+        model.save(f'models/{args.ds}/{exp_name}')
