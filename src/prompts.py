@@ -21,28 +21,8 @@ the value dictionary contains a dictionary with table name as key and a dictiona
 <SCHEMA>:\n{schema}
 <OUTPUT>: 
 '''
-    zero_shot_inference = '''### TASK
-You are tasked with generating a SQL query(in a SQLite Database) according to a user input request.
-You should work in step-by-step reasoning before coming to the full SQL query.
-
-You will be provided an input NL query.
-
-### SCHEMA
-You are working with the following schema in a SQLite Database:
-{schema}
-
-### FORMATTING
-Your output should be of the following JSON format:
-{{
-    "rationale": "<list[str]: the step-by-step reasoning to generate the SQL query>",
-    "full_sql_query": "<str: the full SQL query>"
-}}
-
-### OUTPUT
-<INPUT QUERY>: {input_query}
-<OUTPUT>: 
-'''
-    gen_template = '''### TASK
+# pipeline inference
+    gen_template_with_bos = '''### TASK
 You are tasked with generating a SQL query template(in a SQLite Database) according to a user input NL question.
 You should work in step-by-step reasoning before coming to the full SQL query.
 
@@ -53,7 +33,7 @@ You are working with the following schema in a SQLite Database:
 ### SQL QUERY TEMPLATE
 All the values in the SQL query should be replaced with the following placeholders:
 - `[PLACEHOLDER-TYPE:STRING]` for string values
-- `[PLACEHOLDER-TYPE:NUMBER]` for numeric values
+- `[PLACEHOLDER-TYPE:NUMERIC]` for numeric values
 
 ### HINT
 You will be provided a hint to help you. 
@@ -74,6 +54,178 @@ Your output should be of the following JSON format:
 <HINT>: {hint}
 <OUTPUT>: 
 '''
+    gen_template_no_bos = '''### TASK
+You are tasked with generating a SQL query template(in a SQLite Database) according to a user input NL question.
+You should work in step-by-step reasoning before coming to the full SQL query.
+
+### SCHEMA
+You are working with the following schema in a SQLite Database:
+{schema}
+
+### SQL QUERY TEMPLATE
+All the values in the SQL query should be replaced with the following placeholders:
+- `[PLACEHOLDER-TYPE:STRING]` for string values
+- `[PLACEHOLDER-TYPE:NUMERIC]` for numeric values
+
+### FORMATTING
+Your output should be of the following JSON format:
+{{
+    "rationale": "<list[str]: the step-by-step reasoning to generate the SQL query template>",
+    "sql": "<str: the SQL query template>",
+}}
+
+### OUTPUT
+<INPUT QUERY>: {input_query}
+<OUTPUT>: 
+'''
+    keyword_extraction = '''
+### Objective 
+Analyze the given input query(a natural language question), a evidence and a sql template to identify and extract keywords, keyphrases, and named entities for each column. 
+These elements are crucial for understanding the core components of the inquiry and the guidance provided. This process involves recognizing and isolating significant terms and phrases that could be instrumental in formulating searches or queries related to the posed question.
+
+### Analyze the evidence
+The evidence is designed to direct attention toward certain elements relevant to answering the question. Extract any keywords, phrases, or named entities that could provide further clarity or direction in formulating an answer.
+
+### Instructions
+Read the input query carefully: Understand the primary focus and specific details of the question. Look for any named entities (such as organizations, locations, etc.), technical terms, and other phrases that encapsulate important aspects of the inquiry.
+
+### SQL query template
+All the values in the SQL query should be replaced with the following placeholders:
+- `[PLACEHOLDER-TYPE:STRING]` for string values
+- `[PLACEHOLDER-TYPE:NUMERIC]` for numeric values
+
+### Keyphrases and Entities
+Combine your findings from both the question, evidence and sql template for columns that need a value to fill in the placeholder. 
+This list should contain:
+- Keywords: Single words that capture essential aspects of the question or the evidence.
+- Keyphrases: Short phrases or named entities that represent specific concepts, locations, organizations, or other significant details.
+- Ensure to maintain the original phrasing or terminology used in the question and the evidence.
+
+### Example 1
+<INPUT QUERY>: "What is the annual revenue of Acme Corp in the United States for 2022?"
+<EVIDENCE>: "Focus on financial reports and U.S. market performance for the fiscal year 2022."
+<SQL TEMPLATE>: "SELECT annual_revenue FROM financial_reports WHERE company_name = [PLACEHOLDER-TYPE:STRING] AND country = [PLACEHOLDER-TYPE:STRING] AND fiscal_year = [PLACEHOLDER-TYPE:NUMERIC];"
+<OUTPUT>:
+{{
+    "extraction": {{
+        "company_name": ["Acme Corp", "Acme Corporation", "Acme", "A.C."],
+        "country": ["United States", "U.S."],
+        "fiscal_year": ["2022"]
+    }}
+}}
+
+### Example 2
+<INPUT QUERY>: "In the Winter and Summer Olympics of 1988, which game has the most number of competitors? Find the difference of the number of competitors between the two games."
+<EVIDENCE>: "the most number of competitors refer to MAX(COUNT(person_id)); SUBTRACT(COUNT(person_id where games_name = '1988 Summer'), COUNT(person_id where games_name = '1988 Winter'));"
+<SQL TEMPLATE>: "SELECT games_name, COUNT(person_id) AS num_competitors FROM olympics_participation WHERE games_year = [PLACEHOLDER-TYPE:NUMERIC] AND games_season IN ([PLACEHOLDER-TYPE:STRING], [PLACEHOLDER-TYPE:STRING]) GROUP BY games_name ORDER BY num_competitors DESC LIMIT 1;"
+<OUTPUT>:
+{{
+    "extraction": {{
+        "games_year": ["1988"],
+        "games_season": ["1988 Winter", "1988 Summer"]
+    }}
+}}
+
+### Example 3
+<INPUT QUERY>: "How many Men's 200 Metres Freestyle events did Ian James Thorpe compete in?"
+<EVIDENCE>: "Men's 200 Metres Freestyle events refer to event_name = 'Swimming Men''s 200 metres Freestyle'; events compete in refers to event_id;"
+<SQL TEMPLATE>: "SELECT COUNT(event_id) FROM athlete_participation WHERE athlete_name = [PLACEHOLDER-TYPE:STRING] AND event_name = [PLACEHOLDER-TYPE:STRING];"
+<OUTPUT>:
+{{
+    "extraction": {{
+        "athlete_name": ["Ian James Thorpe"],
+        "event_name": ["Men's 200 Metres Freestyle", "Swimming Men's 200 metres Freestyle"],
+    }}
+}}
+
+### TASK
+Given the following question, evidence and schema, identify and list all relevant keywords, keyphrases, and named entities for columns that need a value to fill in the placeholder.
+Remember, the keyphrases and entities can only be values to be fill into the sql template. Do not include any functions, operators, or other SQL syntax.
+Please provide your findings as `FORMATTING` instructions, capturing the essence of both the question and evidence through the identified terms and phrases. 
+
+### SCHEMA
+You are working with the following schema in a SQLite Database:
+{schema}
+
+### FORMATTING
+Your output should be of the following JSON format:
+{{
+    "rationale": "<list[str]: the step-by-step reasoning for the extraction>",
+    "extraction": "<dict[str, list[str]]: keys for the dictionary are column names and values are list of keywords, keyphrases, and named entities extracted from the question, hint and sql template>",
+}}
+Make sure the keyphrases and entities are string types in the extraction list.
+
+<INPUT QUERY>: {input_query}
+<EVIDENCE>: {evidence}
+<SQL TEMPLATE>: {sql_template}
+<OUTPUT>: 
+'''
+    fill_in = '''### SCHEMA
+You are working with the following schema in a SQLite Database:
+{schema}
+
+### SQL QUERY TEMPLATE
+All the values in the SQL query are replaced with the following placeholders:
+- `[PLACEHOLDER-TYPE:STRING]` for string values
+- `[PLACEHOLDER-TYPE:NUMERIC]` for numeric values
+
+### HINT
+You will be provided a hint to help you. The hint contains a possible values that refers to the column in the SQL query template.
+The structure of the hint as follows:
+```json
+{{
+    <table_name: str>: {{  // table 1
+        <column_name: str>: [<value1: str>, <value2: str>, ...],  // column 1 and its possible values
+        ... // other columns
+    }},
+    ...  // other tables
+}}
+```
+Please use the hint to fill in the placeholder if exists. 
+If the hint is empty for certain columns, you should force to fill in the proper values by yourself. 
+Do not leave any placeholder unfilled.
+
+### FORMATTING
+Your output should be of the following JSON format:
+{{
+    "rationale": "<list[str]: the step-by-step reasoning to generate the SQL query template>",
+    "sql": "<str: the full SQL query>",
+}}
+
+### TASK
+You are tasked with fill in values to the specific placeholder(`[PLACEHOLDER-TYPE:STRING]` or `[PLACEHOLDER-TYPE:NUMERIC]`) according to a user input NL question.
+If the type of the placeholder is string, you should fill in the string value. If the type of the placeholder is number, you should fill in the numeric value.
+You should work in step-by-step reasoning for the placeholder fill-in task to complete the sql template. 
+Do not leave any placeholder unfilled.
+
+### OUTPUT
+<INPUT QUERY>: {input_query}
+<HINT>: {hint}
+<SQL TEMPLATE>: {sql_template}
+<OUTPUT>: 
+'''
+# direct inference
+    zero_shot_inference = '''### TASK
+You are tasked with generating a SQL query(in a SQLite Database) according to a user input request.
+You should work in step-by-step reasoning before coming to the full SQL query.
+
+You will be provided an input NL query.
+
+### SCHEMA
+You are working with the following schema in a SQLite Database:
+{schema}
+
+### FORMATTING
+Your output should be of the following JSON format:
+{{
+    "rationale": "<list[str]: the step-by-step reasoning to generate the SQL query>",
+    "sql": "<str: the full SQL query>"
+}}
+
+### OUTPUT
+<INPUT QUERY>: {input_query}
+<OUTPUT>: 
+'''
     zero_shot_hints_inference = '''### TASK
 You are tasked with generating a SQL query(in a SQLite Database) according to a user input NL question.
 You should work in step-by-step reasoning before coming to the full SQL query.
@@ -83,16 +235,22 @@ You are working with the following schema in a SQLite Database:
 {schema}
 
 ### HINT
-You will be provided a hint to help you. It is called "virtual table".
-You will get either descriptions of the virtual tables or descriptions and templates of virtual tables together.
-You can use or modify the hint to generate the full SQL query.
+You will be provided a hint to help you. 
+(1) "virtual table": a query template the might be relevant to the user's question.
+(2) "description": a natural language description of the virtual table.
+All the values in the SQL query are replaced with the following placeholders:
+- `[PLACEHOLDER-TYPE:STRING]` for string values
+- `[PLACEHOLDER-TYPE:NUMERIC]` for numeric values
+You can use or modify the hint to generate the final SQL query or not to use.
 
 ### FORMATTING
 Your output should be of the following JSON format:
 {{
     "rationale": "<list[str]: the step-by-step reasoning to generate the SQL query>",
-    "full_sql_query": "<str: the full SQL query>"
+    "sql": "<str: the full SQL query>",
+    "hint_used": "<bool: whether you used the hint or not>"
 }}
+Please generate the final sql directly in the output, do not include any placeholders.
 
 ### OUTPUT
 <INPUT QUERY>: {input_query}
@@ -108,8 +266,7 @@ Please output the description always start with "The virtual table..." and avoid
 ### SQL QUERY TEMPLATE
 All the values in the SQL query are replaced with the following placeholders:
 - `[PLACEHOLDER-TYPE:STRING]` for string values
-- `[PLACEHOLDER-TYPE:NUMBER]` for numeric values
-
+- `[PLACEHOLDER-TYPE:NUMERIC]` for numeric values
 
 ### FORMATTING
 Your output should be of the following JSON format:

@@ -1,11 +1,9 @@
 
-from .process_sql import Schema
 from collections import defaultdict
 import sqlglot
 from sqlglot import expressions as exp
 from typing import Set, Tuple, Dict, Any, List
-from src.process_sql import Schema
-from itertools import chain
+from src.db_utils import format_raw_sql
 # OPERATOR_MAP = {
 #     exp.EQ: "=",
 #     exp.GT: ">",
@@ -983,6 +981,7 @@ def extract_all(sql: str, schema: Schema) -> Tuple[Set[str], Set[Tuple[str, str]
     """
     Extract all components from a SELECT query.
     """
+    sql = format_raw_sql(sql)
     parsed_query = sqlglot.parse_one(sql)
     aliases = extract_aliases(parsed_query)
     subqueries = get_subqueries(parsed_query)

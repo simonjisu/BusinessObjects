@@ -3,11 +3,15 @@ import numpy as np
 import pandas as pd
 import argparse
 import sqlglot
+import pickle
 from tqdm import tqdm
 from pathlib import Path
 from collections import defaultdict
 from itertools import product
+import logging
+import hashlib
 
+from copy import deepcopy
 from dotenv import load_dotenv, find_dotenv
 from langchain_openai import ChatOpenAI
 from langchain_core.documents import Document
@@ -30,22 +34,30 @@ from src.prompts import Prompts
 from src.pymodels import (
     SQLResponse, 
     GenTemplateResponse, 
+    KeywordExtractionResponse, 
     DatabaseModel, 
     BirdSample, 
     SpiderSample,
-    BODescription
+    BODescription,
+    DirectSQLResponse
 )
 from src.db_utils import get_schema_str
 from src.data_preprocess import process_all_tables, load_raw_data, load_samples_spider_bird
 from src.database import SqliteDatabase
+from src.db_utils import get_db_file
 from src.parsing_sql import (
-    Schema, extract_all, extract_aliases, _format_expression
+    Schema, extract_all, extract_aliases, _format_expression, STRING_TYPE, NUMERIC_TYPE
 )
-from src.eval_utils import get_complexity
+from src.eval_utils import (
+    get_complexity, 
+    run_sqls_parallel,
+    get_all_structural_score,
+    get_all_semantic_score
+)
 
 _ = load_dotenv(find_dotenv())
 
-from typing import Iterator
+from typing import Iterator, Generator, Any
 from itertools import product, islice
 
 def batched(iterable, n, *, strict=False):
@@ -134,7 +146,7 @@ def _get_df_from_bos(bos):
 
 def create_vt_ba(
         samples: list[SpiderSample|BirdSample], 
-        tables: dict[DatabaseModel],
+        tables: dict[str, DatabaseModel],
         chain: RunnableSequence,
         prediction_path: Path,
         file_name: str,
@@ -274,7 +286,7 @@ def task_retrieve(
         raise KeyError('Invalid embedding model for `reranker_model`, either `msmarco` or `custom`')
     
     # filename pattern [prefix]-[db_id].json
-    processed_db_ids = [p.stem.split('-')[1] for p in prediction_path.glob(f'{prefix}*.json')]
+    processed_db_ids = [p.stem.split('-')[-1] for p in prediction_path.glob(f'{prefix}*.json')]
     if processed_db_ids:
         bos = dict([(db_id, bo_list) for db_id, bo_list in bos.items() if db_id not in processed_db_ids])
         print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}...')
@@ -314,7 +326,7 @@ def task_retrieve(
         with open(prediction_path / f'{prefix}{db_id}.json', 'w') as f:
             json.dump(results, f)
 
-    file_name = 'retrieval_test.json' if is_test else 'retrieval_dev.json'
+    file_name = 'with_bos-test.json' if is_test else 'with_bos-dev.json'
     with open(prediction_path / file_name, 'w') as file:
         all_results = []
         for p in prediction_path.glob(f'{prefix}*.json'):
@@ -325,77 +337,114 @@ def task_retrieve(
 
 def task_gen_template(
         samples: list[SpiderSample|BirdSample],
-        tables: dict[DatabaseModel],
+        tables: dict[str, DatabaseModel],
         bos: dict[str, list[dict[str, str]]],
         retrieved: dict[str, int|list[int]],
         chain: RunnableSequence,
         prediction_path: Path,
+        with_bos: bool = False,
         prefix: str = 'x-',
         is_test: bool = False
     ):
-    pass
-    # filename pattern [prefix]-[db_id].json
-    processed_db_ids = [p.stem.split('-')[1] for p in prediction_path.glob(f'{prefix}*.json')]
+    n_batch = 32 if is_test else 2 # batch size
+    n_batch = n_batch if with_bos else 32
+    def create_hint(id2bo, doc_ids):
+        docs = [{
+            'descrption': id2bo[doc_id]['ba'], 
+            'virtual_table': id2bo[doc_id]['vt']
+        } for doc_id in doc_ids]
+        
+        hint = '\nDescriptions and Virtual Tables:\n'
+        hint += json.dumps({j: doc for j, doc in enumerate(docs)}, indent=4)
+        hint += '\n'
+        return hint
+
+    # filename pattern [prefix][db_id].json
+    # retrieved:
+    # test: [{db_id, sample_id, retrieved, }]
+    # dev: {db_id: [bo_id1, ...]}
+    processed_db_ids = [p.stem.split('-')[-1] for p in prediction_path.glob(f'{prefix}*.json')]
     if processed_db_ids:
         samples = [sample for sample in samples if sample.db_id not in processed_db_ids]
         print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}')
 
-    retrieved_by_db_id = defaultdict(dict)
-    empty_sample_ids = []
-    for sample in retrieved:
-        if len(sample['retrieved']) == 0:
-            empty_sample_ids.append(sample['sample_id'])
-        else:
+    if with_bos and is_test:
+        retrieved_by_db_id = defaultdict(dict)
+        for sample in retrieved:
             db_id = sample['db_id']
             sample_id = sample['sample_id']
-            
             retrieved_by_db_id[db_id][sample_id] = sample['retrieved']
-
-    # filter empty retrieved samples
-    samples = list(filter(lambda x: x.sample_id not in empty_sample_ids, samples))
 
     samples_by_db_id = defaultdict(list)
     for sample in samples:
         samples_by_db_id[sample.db_id].append(sample)
 
     for db_id, samples in samples_by_db_id.items():
-        set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{db_id}.db"))
+        set_llm_cache(SQLiteCache(database_path=f"./cache/{prefix}{prediction_path.stem}_{db_id}.db"))
         schema_str = get_schema_str(
             schema=tables[db_id].db_schema, 
             foreign_keys=tables[db_id].foreign_keys,
             col_explanation=tables[db_id].col_explanation
         )
-        id2bo = {} 
-        for x in bos[db_id]:
-            id2bo[x['sample_id']] = x
+        if with_bos:
+            id2bo = {} 
+            for x in bos[db_id]:
+                id2bo[x['sample_id']] = x
 
         results = []
-        for sample in tqdm(samples, total=len(samples), desc=f"{db_id}"):
-            question = sample.final.question
-            doc_ids = retrieved_by_db_id[db_id][sample.sample_id]
-            docs = [{'descrption': id2bo[doc_id]['ba'], 
-                     'virtual_table': id2bo[doc_id]['vt']} for doc_id in doc_ids]
+        batched_samples: list[BirdSample|SpiderSample] = list(batched(samples, n_batch))
+        for batch in tqdm(batched_samples, total=len(batched_samples), desc=f"{db_id}"):
+            batch_inputs = []
+            batch_retrieved = []
+            batch_sample_ids = []
+            if with_bos:
+                if is_test:
+                    for sample in batch:
+                        question = sample.final.question
+                        doc_ids = retrieved_by_db_id[db_id][sample.sample_id]
+                        hint = create_hint(id2bo, doc_ids)
+                        input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
+                        batch_inputs.append(input_data)
+                        batch_retrieved.append(doc_ids)
+                        batch_sample_ids.append(sample.sample_id)
+                else:
+                    for bo_id, sample in product(retrieved[db_id], batch):
+                        question = sample.final.question
+                        doc_ids = [bo_id]
+                        hint = create_hint(id2bo, doc_ids)
+                        input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
+                        batch_inputs.append(input_data)
+                        batch_retrieved.append(doc_ids)
+                        batch_sample_ids.append(sample.sample_id)
+            else:
+                for sample in batch:
+                    question = sample.final.question
+                    input_data = {'schema': schema_str, 'input_query': question}
+                    batch_inputs.append(input_data)
+                    batch_retrieved.append([])
+                    batch_sample_ids.append(sample.sample_id)
             
-            hint = '\nDescriptions and Virtual Tables:\n'
-            hint += json.dumps({j: doc for j, doc in enumerate(docs)}, indent=4)
-            hint += '\n'
-            input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
-    
             with get_openai_callback() as cb:
-                output: GenTemplateResponse = chain.invoke(input=input_data)
-            
-            res = {}
-            res['sample_id'] = sample.sample_id
-            res['rationale'] = output.rationale
-            res['sql_template'] = output.sql
-            res['hint_used'] = output.hint_used
-            res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
-            results.append(res)
+                batch_outputs: list[GenTemplateResponse] = chain.batch(inputs=batch_inputs)
+
+            for sample_id, output, doc_ids in zip(batch_sample_ids, batch_outputs, batch_retrieved):
+                res = {}
+                res['sample_id'] = sample_id
+                res['rationale'] = output.rationale
+                res['sql_template'] = output.sql
+                if with_bos:
+                    res['hint_used'] = output.hint_used
+                res['token_usage'] = {'tokens': cb.total_tokens/len(batch), 'cost': cb.total_cost/len(batch)}
+                res['doc_ids'] = doc_ids
+                results.append(res)
 
         with open(prediction_path / f'{prefix}{db_id}.json', 'w') as f:
             json.dump(results, f, indent=4)
     
-    file_name = 'gen_template_test.json' if is_test else 'gen_template_dev.json'
+    file_p1 = 'no_bos' if not with_bos else 'with_bos'
+    file_p2 = 'test' if is_test else 'dev'
+    file_name = f'{file_p1}-{file_p2}.json'
+    
     with open(prediction_path / file_name, 'w') as file:
         all_results = []
         for p in prediction_path.glob(f'{prefix}*.json'):
@@ -404,175 +453,656 @@ def task_gen_template(
             all_results.extend(temp)
         json.dump(all_results, file, indent=4)
 
-def valid_bo(
-        samples: list[SpiderSample|BirdSample],
-        tables: dict[DatabaseModel],
-        bos: dict[str, list[dict[str, str]]],
+def task_keyword_extraction(
+        input_samples: list[dict[str, str|int]],
+        template_sample_id2doc_ids: dict[int, set[int]],  # mapping back by combining `sample_id` and `doc_ids`
+        tables: dict[str, DatabaseModel],
         chain: RunnableSequence,
         prediction_path: Path,
-        file_name: str = '[args.ds]_[args.type]',
-        split_k: int = 2,
+        with_bos: bool = False,
+        prefix: str = 'x-',
+        is_test: bool = False
     ):
-    # "[file_name]_[db_id]-[idx_bo]"
-    # restart from checkpoint
-    processed_files = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
-    if processed_files:
-        bos = dict([x for x in bos.items() if x[0] not in processed_files])
-        print(f'Skip some processed db_ids: {len(processed_files)} {processed_files[-5:]}')
-
-    for detail_file_name, train_bos in bos.items():
-        set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{detail_file_name}.db"))
-        train_bos = train_bos['train_bos']
-        db_id = detail_file_name.split('-')[0]    
-        schema_str = get_schema_str(
-            schema=tables[db_id].db_schema, 
-            foreign_keys=tables[db_id].foreign_keys,
-            col_explanation=tables[db_id].col_explanation
-        )
-        results = []
-        x_samples = list(filter(lambda x: x.db_id == db_id, samples))
-        iterator = list(product(train_bos, x_samples))
-        iterator = tqdm(iterator, total=len(iterator), desc=f"{detail_file_name}")
-        for bo, sample in iterator:
-            res = {
-                'sample_id': sample.sample_id,
-                'gold_sql': sample.final.sql,
-                'question': sample.final.question,
-                'retrieved': bo['sample_id'],
-            }
-            question = sample.final.question
-            hint = '\nDescriptions and Virtual Tables:\n'
-            hint += json.dumps({'description': bo['ba'], 'virtual_table': bo['vt']}, indent=4)
-            hint += '\n'
-            input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
-            with get_openai_callback() as cb:
-                output = chain.invoke(input=input_data)
-
-            res.update({
-                'rationale': output.rationale,
-                'pred_sql': output.sql,
-                'token_usage': {'tokens': cb.total_tokens, 'cost': cb.total_cost}
-            })
-            results.append(res)
-
-        with open(prediction_path / f'{file_name}_{detail_file_name}.json', 'w') as f:
-            json.dump(results, f, indent=4)
-
-def predict_sql_bo(
-        samples: list[SpiderSample|BirdSample],
-        tables: dict[DatabaseModel],
-        test_bos: dict[str, dict[str, list[str]|int]],
-        chain: RunnableSequence,
-        prediction_path: Path,
-        file_name: str = '[args.ds]_[args.type]_[args.scenario]',
-        split_k: int = 3,
-        k_retrieval: int = 5,  # for test
-        n_retrieval: int = 1,   # for test
-        score_threshold: float = 0.65,
-        use_reranker: bool = False,
-        is_question_query: bool = False
-    ):
-    processed_db_ids = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
-    # restart from checkpoint
-    if processed_db_ids:
-        samples = [sample for sample in samples if sample.db_id not in processed_db_ids]
-        print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}')
-
+    n_batch = 32
+    # filename pattern [prefix][db_id].json
+    processed_db_ids = [p.stem.split('-')[-1] for p in prediction_path.glob(f'{prefix}*.json')]
+    # group by db_ids
     samples_by_db_id = defaultdict(list)
-    for sample in samples:
-        samples_by_db_id[sample.db_id].append(sample)
+    for sample in input_samples:
+        # sample: {sample_id, db_id, question, evidence, sql_template}
+        db_id = sample['db_id']
+        if db_id not in processed_db_ids:
+            x = {
+                'sample_id': sample['sample_id'],
+                'question': sample['question'],
+                'evidence': sample['evidence'],
+                'sql_template': sample['sql_template'],
+            }
+            samples_by_db_id[db_id].append(x)
 
-    if use_reranker:
-        cross_encoder = HuggingFaceCrossEncoder(model_name='cross-encoder/ms-marco-MiniLM-L-6-v2')
-    else:
-        cross_encoder = None
-
-    # use train set to evaluate development set
     for db_id, samples in samples_by_db_id.items():
-        set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{file_name}_{db_id}.db"))
-        print(f'[{db_id}] Creating vector store...')
-        vectorstore = get_vector_store(test_bos, is_question_query)
-        retriever = get_retriever(
-            vectorstore, db_id, cross_encoder,
-            n_retrieval, k_retrieval, score_threshold, use_reranker
-        )
+        set_llm_cache(SQLiteCache(database_path=f"./cache/{prefix}{prediction_path.stem}_{db_id}.db"))
+        results = []
+        schema_str = get_schema_str(schema=tables[db_id].db_schema)
+
+        batched_samples: list[dict] = list(batched(samples, n_batch))
+        for batch in tqdm(batched_samples, total=len(batched_samples), desc=f"{db_id}"):
+            batch_inputs = []
+            batch_iidx2oidx: dict[int, int] = {}  # input_idx --> output_idx for batch_outputs
+            
+            for iidx, sample in enumerate(batch):
+                # STRING_TYPE = '[PLACEHOLDER-TYPE:STRING]'.lower()
+                # NUMERIC_TYPE = '[PLACEHOLDER-TYPE:NUMERIC]'.lower()
+                # only need to inference on the queries that has placeholders
+                if (STRING_TYPE.lower() in sample['sql_template'].lower()) or (NUMERIC_TYPE.lower() in sample['sql_template'].lower()):
+                    input_data = {
+                        'schema': schema_str,
+                        'input_query': sample['question'],
+                        'evidence': sample['evidence'],
+                        'sql_template': sample['sql_template'] 
+                    }
+                    batch_inputs.append(input_data)
+                    batch_iidx2oidx[iidx] = len(batch_inputs) - 1
+            
+            if batch_inputs:
+                with get_openai_callback() as cb:
+                    batch_outputs: list[KeywordExtractionResponse] = chain.batch(inputs=batch_inputs)
+            else:
+                batch_outputs = []
+
+            for iidx, sample in enumerate(batch):
+                sample_id = sample['sample_id']
+                sql_template = sample['sql_template']
+                res = {'sample_id': sample_id}
+                
+                oidx = batch_iidx2oidx.get(iidx)
+                if oidx is not None:
+                    res['keywords'] = batch_outputs[oidx].extraction
+                else:
+                    res['keywords'] = {}
+                res['token_usage'] = {'tokens': cb.total_tokens/n_batch, 'cost': cb.total_cost/n_batch}
+
+                key = (sql_template, sample_id)
+                doc_ids = template_sample_id2doc_ids.get(key)
+                if doc_ids:
+                    for doc_id in doc_ids:
+                        new_res = deepcopy(res)
+                        new_res['doc_ids'] = [doc_id]
+                        results.append(new_res)
+                else:
+                    res['doc_ids'] = []
+                    results.append(res)
+
+        with open(prediction_path / f'{prefix}{db_id}.json', 'w') as f:
+            json.dump(results, f, indent=4)
+
+    file_p1 = 'no_bos' if not with_bos else 'with_bos'
+    file_p2 = 'test' if is_test else 'dev'
+    file_name = f'{file_p1}-{file_p2}.json'
+
+    with open(prediction_path / file_name, 'w') as file:
+        all_results = []
+        for p in prediction_path.glob(f'{prefix}*.json'):
+            with p.open() as f:
+                temp = json.load(f)
+            all_results.extend(temp)
+        json.dump(all_results, file, indent=4)
+
+def task_search_value(
+        input_samples: list[dict[str, str|int]],
+        keyword_sample_id2doc_ids: dict[tuple[str, int], set[int]],
+        prediction_path: Path,
+        with_bos: bool = False,
+        prefix: str = 'x-',
+        is_test: bool = False
+    ):
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+    # filename pattern [prefix][db_id].json
+    processed_db_ids = [p.stem.split('-')[-1] for p in prediction_path.glob(f'{prefix}*.json')]
+    # group by db_ids
+    samples_by_db_id = defaultdict(list)
+    for sample in input_samples:
+        # sample: {sample_id, db_id, db_file, search_keywords}
+        db_id = sample['db_id']
+        db_file = sample['db_file']
+        if db_id not in processed_db_ids:
+            samples_by_db_id[(db_id, str(db_file))].append({
+                'sample_id': sample['sample_id'],
+                'db_file': db_file,
+                'search_keywords': sample['search_keywords']
+            })
+
+    for (db_id, db_file), samples in samples_by_db_id.items():
+        results = []
+        # initialize db
+        db = SqliteDatabase(db_file=db_file)
+        iterator = tqdm(samples, total=len(samples))
+        for sample in iterator:
+            iterator.set_description(f"{db_id} - {sample['sample_id']}")
+            keywords: dict[str, list[str]] = sample['search_keywords']
+            all_values: dict[str, dict[str, set[str]]] = {}
+            
+            if keywords:
+                # only search for values if there are keywords
+                for target_column, kws in keywords.items():    
+                    for kw in kws:
+                        iterator.set_postfix_str(f"Keyword: {kw}")
+                        values = db.search_possible_similar_values(
+                            keyword=kw,
+                            target_column=target_column,
+                            top_k=1,
+                            embedding_type='huggingface'
+                        )
+                        for table_name, column_values in values.items():
+                            for column_name, vs in column_values.items():
+                                if not vs:
+                                    continue
+
+                                if table_name not in all_values:
+                                    all_values[table_name] = {}
+                                if column_name not in all_values[table_name]:
+                                    all_values[table_name][column_name] = set()
+                            
+                                all_values[table_name][column_name].update(vs)
+            
+            # make set as list
+            for table_name, column_values in all_values.items():
+                for column_name, vs in column_values.items():
+                    all_values[table_name][column_name] = list(vs)
+
+            res = {
+                'sample_id': sample['sample_id'],
+                'values': all_values
+            }
+            key = (json.dumps(keywords), sample['sample_id'])
+            doc_ids = keyword_sample_id2doc_ids[key]
+            if doc_ids:
+                for doc_id in doc_ids:
+                    new_res = deepcopy(res)
+                    new_res['doc_ids'] = [doc_id]
+                    results.append(new_res)
+            else:
+                res['doc_ids'] = []
+                results.append(res)
+
+        with open(prediction_path / f'{prefix}{db_id}.json', 'w') as f:
+            json.dump(results, f, indent=4)
+
+    file_p1 = 'no_bos' if not with_bos else 'with_bos'
+    file_p2 = 'test' if is_test else 'dev'
+    file_name = f'{file_p1}-{file_p2}.json'
+    with open(prediction_path / file_name, 'w') as file:
+        all_results = []
+        for p in prediction_path.glob(f'{prefix}*.json'):
+            with p.open() as f:
+                temp = json.load(f)
+            all_results.extend(temp)
+        json.dump(all_results, file, indent=4)
+        
+
+def task_fill_in(
+        input_samples: list[dict[str, str|int]],
+        template_values_sample_id2doc_ids: dict[tuple[str, int], set[int]],
+        tables: dict[str, DatabaseModel],
+        chain: RunnableSequence,
+        prediction_path: Path,
+        with_bos: bool = False,
+        prefix: str = 'x-',
+        is_test: bool = False
+    ):
+    n_batch = 32
+    # filename pattern [prefix][db_id].json
+    processed_db_ids = [p.stem.split('-')[-1] for p in prediction_path.glob(f'{prefix}*.json')]
+    # group by db_ids
+    samples_by_db_id = defaultdict(list)
+    for sample in input_samples:
+        # sample: {sample_id, question, db_id, values, question, sql_template}
+        # `doc_ids`: if not `with_bos` then `doc_ids` is None
+        db_id = sample['db_id']
+        if db_id not in processed_db_ids:
+            samples_by_db_id[db_id].append({
+                'sample_id': sample['sample_id'],
+                'question': sample['question'],
+                'values': sample['values'],
+                'sql_template': sample['sql_template'],
+            })
+
+    for db_id, samples in samples_by_db_id.items():
+        set_llm_cache(SQLiteCache(database_path=f"./cache/{prefix}{prediction_path.stem}_{db_id}.db"))
+        results = []
         schema_str = get_schema_str(
             schema=tables[db_id].db_schema, 
-            foreign_keys=tables[db_id].foreign_keys,
             col_explanation=tables[db_id].col_explanation
         )
-        results = []
-        for sample in tqdm(samples, total=len(samples), desc=f"{db_id}"):
-            question = sample.final.question
-            docs = retriever.invoke(question)
-            hint = '\nDescriptions and Virtual Tables:\n'
-            hint += json.dumps({j: {'description': doc.page_content, 'virtual_table': doc.metadata['vt']} for j, doc in enumerate(docs)}, indent=4)
-            hint += '\n'
-            input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
-    
-            with get_openai_callback() as cb:
-                output = chain.invoke(input=input_data)
-            
-            res = {}
-            res['sample_id'] = sample.sample_id
-            res['rationale'] = output.rationale
-            res['pred_sql'] = output.sql
-            res['retrieved'] = [doc.metadata['sample_id'] for doc in docs]
-            res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
-            results.append(res)
 
-        with open(prediction_path / f'{file_name}_{db_id}.json', 'w') as f:
+        batched_samples: list[dict] = list(batched(samples, n_batch))
+        for batch in tqdm(batched_samples, total=len(batched_samples), desc=f"{db_id}"):
+            batch_inputs = []
+            batch_iidx2oidx: dict[int, int] = {}  # input_idx --> output_idx for batch_outputs
+            
+            for iidx, sample in enumerate(batch):
+                # STRING_TYPE = '[PLACEHOLDER-TYPE:STRING]'.lower()
+                # NUMERIC_TYPE = '[PLACEHOLDER-TYPE:NUMERIC]'.lower()
+                # only need to inference on the queries that has placeholders
+                if (STRING_TYPE.lower() in sample['sql_template'].lower()) or (NUMERIC_TYPE.lower() in sample['sql_template'].lower()):
+                    input_data = {
+                        'schema': schema_str,
+                        'input_query': sample['question'],
+                        'hint': json.dumps(sample['values'], indent=4),
+                        'sql_template': sample['sql_template']
+                    }
+                    batch_inputs.append(input_data)
+                    batch_iidx2oidx[iidx] = len(batch_inputs) - 1
+            
+            if batch_inputs:
+                with get_openai_callback() as cb:
+                    batch_outputs: list[SQLResponse] = chain.batch(inputs=batch_inputs)
+            else:
+                batch_outputs = []
+
+            for iidx, sample in enumerate(batch):
+                sample_id = sample['sample_id']
+                sql_template = sample['sql_template']
+                values = sample['values']
+                res = {'sample_id': sample_id}
+
+                oidx = batch_iidx2oidx.get(iidx)
+                if oidx is not None:
+                    res['rationale'] = batch_outputs[oidx].rationale
+                    res['sql'] = batch_outputs[oidx].sql
+                else:
+                    res['rationale'] = ''
+                    res['sql'] = sample['sql_template']
+                res['token_usage'] = {'tokens': cb.total_tokens/n_batch, 'cost': cb.total_cost/n_batch}
+
+                key = (sql_template, json.dumps(values), sample_id)
+                doc_ids = template_values_sample_id2doc_ids.get(key)
+                if doc_ids:
+                    for doc_id in doc_ids:
+                        new_res = deepcopy(res)
+                        new_res['doc_ids'] = [doc_id]
+                        results.append(new_res)
+                else:
+                    res['doc_ids'] = []
+                    results.append(res)
+
+        with open(prediction_path / f'{prefix}{db_id}.json', 'w') as f:
             json.dump(results, f, indent=4)
+
+    file_p1 = 'no_bos' if not with_bos else 'with_bos'
+    file_p2 = 'test' if is_test else 'dev'
+    file_name = f'{file_p1}-{file_p2}.json'
+    with open(prediction_path / file_name, 'w') as file:
+        all_results = []
+        for p in prediction_path.glob(f'{prefix}*.json'):
+            with p.open() as f:
+                temp = json.load(f)
+            all_results.extend(temp)
+        json.dump(all_results, file, indent=4)
+
+def evaluate_exec(
+        eval_data: dict,
+        eval_data2doc_ids: dict[str, set[int]],  # key(sample_id+pred_sql): {doc_id}
+        eval_file: Path, 
+        num_cpus: int = 4, 
+        meta_time_out: float = 30.0
+    ): 
+    eval_path = eval_file.parent
+    n_batch = 2000
+    n_samples = len(eval_data['sample_ids'])
+    batches = list(batched(range(n_samples), n_batch))
+    for batch_i, idxes in enumerate(batches):
+        logging.info(f"Processing execution - batch {batch_i+1}/{len(batches)}")
+        if (eval_path / f'temp-{batch_i}.json').exists():
+            continue
+        batch_results = []
+        batch_eval_data = {k: [v[i] for i in idxes] for k, v in eval_data.items()}
+        batch_preds = [x for x in batch_eval_data['pred_queries']]
+        batch_sample_ids = [x for x in batch_eval_data['sample_ids']]
+        batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
+        del batch_eval_data  # free memory
+        assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
+       
+        for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
+            key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
+            doc_ids = eval_data2doc_ids.get(key)
+            result = batch_exec_result[j]
+            if doc_ids:
+                for doc_id in doc_ids:
+                    new_res = deepcopy(result)
+                    new_res['doc_ids'] = [doc_id]
+                    batch_results.append(new_res)
+            else:
+                result['doc_ids'] = []
+                batch_results.append(result)
+
+        with open(eval_path / f'temp-{batch_i}.json', 'w') as f:
+            json.dump(batch_results, f, indent=4)
+
+    final_results = []
+    for i in range(len(batches)):
+        with open(eval_path / f'temp_exec-{i}.json') as f:
+            temp = json.load(f)
+        final_results.extend(temp)
+
+    with open(eval_file, 'w') as f:
+        json.dump(final_results, f, indent=4)
+
+    # remove all temp files
+    for i in range(len(batches)):
+        (eval_path / f'temp_exec-{i}.json').unlink()
+
+    # assert len(exec_result) == len(eval_data['sample_ids']), f"Length of exec_result({len(exec_result)}) and eval_data({len(eval_data['sample_ids'])}) should be the same"
+    # final_results = []
+    # for i in range(len(eval_data['sample_ids'])):
+    #     sample_id = eval_data['sample_ids'][i]
+    #     pred_sql = eval_data['pred_queries'][i]
+    #     key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
+    #     doc_ids = eval_data2doc_ids.get(key)
+    #     result = exec_result[i]  # result: sample_id, res, target_error
+    #     if doc_ids: 
+    #         for doc_id in doc_ids:
+    #             new_res = deepcopy(result)
+    #             new_res['doc_ids'] = [doc_id]
+    #             final_results.append(new_res)
+    #     else:
+    #         result['doc_ids'] = []
+    #         final_results.append(result)
+
+    # with open(eval_file, 'w') as f:
+    #     json.dump(final_results, f, indent=4)
+
+def evaluate_merit(
+        eval_data: dict,
+        eval_data2doc_ids: dict[str, set[int]],  # key(sample_id+pred_sql): {doc_id}
+        parsed_queries: dict[str, dict[str, Any]],  # {pred/target: {pred_sql/target_sql: parsed_query}}
+        eval_file: Path, 
+    ):
+    eval_path = eval_file.parent
+    n_batch = 2000
+    n_samples = len(eval_data['sample_ids'])
+    batches = list(batched(range(n_samples), n_batch))
+    for batch_i, idxes in enumerate(batches):
+        logging.info(f"Processing merit - batch {batch_i+1}/{len(batches)}")
+        if (eval_path / f'temp-{batch_i}.json').exists():
+            continue
+        batch_keys = []
+        batch_target_parsed = []
+        batch_pred_parsed = []
+        batch_target_complexities = []
+        batch_eval_data = {k: [v[i] for i in idxes] for k, v in eval_data.items()}
+        for i in range(len(batch_eval_data['sample_ids'])):
+            sample_id = batch_eval_data['sample_ids'][i]
+            pred_sql = batch_eval_data['pred_queries'][i]
+            target_sql = batch_eval_data['target_queries'][i]
+            batch_pred_parsed.append(parsed_queries['pred'][pred_sql])
+            batch_target_parsed.append(parsed_queries['target'][target_sql])
+            batch_target_complexities.append(get_complexity(parsed_queries['target'][target_sql]))
+            key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
+            batch_keys.append(key)
+
+        structural_scores = get_all_structural_score(batch_pred_parsed, batch_target_parsed)
+        semantic_scores = get_all_semantic_score(batch_pred_parsed, batch_target_parsed)
+        epsilon = 1e-9
+        structural_scores: np.ndarray = np.array(structural_scores)
+        semantic_scores: np.ndarray = np.array(semantic_scores)
+        f1_scores: np.ndarray = 2 * (structural_scores * semantic_scores) / (structural_scores + semantic_scores + epsilon)
+
+        results = []
+        for i in range(len(batch_eval_data['sample_ids'])):
+            key = batch_keys[i]
+            doc_ids = eval_data2doc_ids.get(key)
+            if doc_ids:
+                for doc_id in doc_ids:
+                    results.append({
+                        'sample_id': batch_eval_data['sample_ids'][i],
+                        'structural_score': structural_scores[i],
+                        'semantic_score': semantic_scores[i],
+                        'f1_score': f1_scores[i],
+                        'target_complexity': batch_target_complexities[i],
+                        'doc_ids': [doc_id]
+                    })
+            else:
+                results.append({
+                    'sample_id': batch_eval_data['sample_ids'][i],
+                    'structural_score': structural_scores[i],
+                    'semantic_score': semantic_scores[i],
+                    'f1_score': f1_scores[i],
+                    'target_complexity': batch_target_complexities[i],
+                    'doc_ids': []
+                })
+
+        with open(eval_path / f'temp-{batch_i}.json', 'w') as f:
+            json.dump(results, f, indent=4)
+
+    final_results = []
+    for i in range(len(batches)):
+        with open(eval_path / f'temp_merit-{i}.json') as f:
+            temp = json.load(f)
+        final_results.extend(temp)
+
+    with open(eval_file, 'w') as f:
+        json.dump(final_results, f, indent=4)
+
+    # remove all temp files
+    for i in range(len(batches)):
+        (eval_path / f'temp_merit-{i}.json').unlink()
+
+    # keys = []
+    # target_parsed = []
+    # pred_parsed = []
+    # target_complexities = []
+    # for i in range(len(eval_data['sample_ids'])):
+    #     sample_id = eval_data['sample_ids'][i]
+    #     pred_sql = eval_data['pred_queries'][i]
+    #     target_sql = eval_data['target_queries'][i]
+    #     pred_parsed.append(parsed_queries['pred'][pred_sql])
+    #     target_parsed.append(parsed_queries['target'][target_sql])
+    #     target_complexities.append(get_complexity(parsed_queries['target'][target_sql]))
+        
+    #     key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
+    #     keys.append(key)
+    
+    # structural_scores = get_all_structural_score(pred_parsed, target_parsed)
+    # semantic_scores = get_all_semantic_score(pred_parsed, target_parsed)
+
+    # epsilon = 1e-9
+    # structural_scores: np.ndarray = np.array(structural_scores)
+    # semantic_scores: np.ndarray = np.array(semantic_scores)
+    # f1_scores: np.ndarray = 2 * (structural_scores * semantic_scores) / (structural_scores + semantic_scores + epsilon)
+
+    # results = []
+    # for i in range(len(eval_data['sample_ids'])):
+    #     key = keys[i]
+    #     doc_ids = eval_data2doc_ids.get(key)
+    #     if doc_ids:
+    #         for doc_id in doc_ids:
+    #             results.append({
+    #                 'sample_id': eval_data['sample_ids'][i],
+    #                 'structural_score': structural_scores[i],
+    #                 'semantic_score': semantic_scores[i],
+    #                 'f1_score': f1_scores[i],
+    #                 'target_complexity': target_complexities[i],
+    #                 'doc_ids': [doc_id]
+    #             })
+    #     else:
+    #         results.append({
+    #             'sample_id': eval_data['sample_ids'][i],
+    #             'structural_score': structural_scores[i],
+    #             'semantic_score': semantic_scores[i],
+    #             'f1_score': f1_scores[i],
+    #             'target_complexity': target_complexities[i],
+    #             'doc_ids': []
+    #         })
+
+# def valid_bo(
+#         samples: list[SpiderSample|BirdSample],
+#         tables: dict[str, DatabaseModel],
+#         bos: dict[str, list[dict[str, str]]],
+#         chain: RunnableSequence,
+#         prediction_path: Path,
+#         file_name: str = '[args.ds]_[args.type]',
+#         split_k: int = 2,
+#     ):
+#     # "[file_name]_[db_id]-[idx_bo]"
+#     # restart from checkpoint
+#     processed_files = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
+#     if processed_files:
+#         bos = dict([x for x in bos.items() if x[0] not in processed_files])
+#         print(f'Skip some processed db_ids: {len(processed_files)} {processed_files[-5:]}')
+
+#     for detail_file_name, train_bos in bos.items():
+#         set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{detail_file_name}.db"))
+#         train_bos = train_bos['train_bos']
+#         db_id = detail_file_name.split('-')[0]    
+#         schema_str = get_schema_str(
+#             schema=tables[db_id].db_schema, 
+#             foreign_keys=tables[db_id].foreign_keys,
+#             col_explanation=tables[db_id].col_explanation
+#         )
+#         results = []
+#         x_samples = list(filter(lambda x: x.db_id == db_id, samples))
+#         iterator = list(product(train_bos, x_samples))
+#         iterator = tqdm(iterator, total=len(iterator), desc=f"{detail_file_name}")
+#         for bo, sample in iterator:
+#             res = {
+#                 'sample_id': sample.sample_id,
+#                 'gold_sql': sample.final.sql,
+#                 'question': sample.final.question,
+#                 'retrieved': bo['sample_id'],
+#             }
+#             question = sample.final.question
+#             hint = '\nDescriptions and Virtual Tables:\n'
+#             hint += json.dumps({'description': bo['ba'], 'virtual_table': bo['vt']}, indent=4)
+#             hint += '\n'
+#             input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
+#             with get_openai_callback() as cb:
+#                 output = chain.invoke(input=input_data)
+
+#             res.update({
+#                 'rationale': output.rationale,
+#                 'pred_sql': output.sql,
+#                 'token_usage': {'tokens': cb.total_tokens, 'cost': cb.total_cost}
+#             })
+#             results.append(res)
+
+#         with open(prediction_path / f'{file_name}_{detail_file_name}.json', 'w') as f:
+#             json.dump(results, f, indent=4)
+
+# def predict_sql_bo(
+#         samples: list[SpiderSample|BirdSample],
+#         tables: dict[str, DatabaseModel],
+#         test_bos: dict[str, dict[str, list[str]|int]],
+#         chain: RunnableSequence,
+#         prediction_path: Path,
+#         file_name: str = '[args.ds]_[args.type]_[args.scenario]',
+#         split_k: int = 3,
+#         k_retrieval: int = 5,  # for test
+#         n_retrieval: int = 1,   # for test
+#         score_threshold: float = 0.65,
+#         use_reranker: bool = False,
+#         is_question_query: bool = False
+#     ):
+#     processed_db_ids = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
+#     # restart from checkpoint
+#     if processed_db_ids:
+#         samples = [sample for sample in samples if sample.db_id not in processed_db_ids]
+#         print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}')
+
+#     samples_by_db_id = defaultdict(list)
+#     for sample in samples:
+#         samples_by_db_id[sample.db_id].append(sample)
+
+#     if use_reranker:
+#         cross_encoder = HuggingFaceCrossEncoder(model_name='cross-encoder/ms-marco-MiniLM-L-6-v2')
+#     else:
+#         cross_encoder = None
+
+#     # use train set to evaluate development set
+#     for db_id, samples in samples_by_db_id.items():
+#         set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{file_name}_{db_id}.db"))
+#         print(f'[{db_id}] Creating vector store...')
+#         vectorstore = get_vector_store(test_bos, is_question_query)
+#         retriever = get_retriever(
+#             vectorstore, db_id, cross_encoder,
+#             n_retrieval, k_retrieval, score_threshold, use_reranker
+#         )
+#         schema_str = get_schema_str(
+#             schema=tables[db_id].db_schema, 
+#             foreign_keys=tables[db_id].foreign_keys,
+#             col_explanation=tables[db_id].col_explanation
+#         )
+#         results = []
+#         for sample in tqdm(samples, total=len(samples), desc=f"{db_id}"):
+#             question = sample.final.question
+#             docs = retriever.invoke(question)
+#             hint = '\nDescriptions and Virtual Tables:\n'
+#             hint += json.dumps({j: {'description': doc.page_content, 'virtual_table': doc.metadata['vt']} for j, doc in enumerate(docs)}, indent=4)
+#             hint += '\n'
+#             input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
+    
+#             with get_openai_callback() as cb:
+#                 output = chain.invoke(input=input_data)
+            
+#             res = {}
+#             res['sample_id'] = sample.sample_id
+#             res['rationale'] = output.rationale
+#             res['pred_sql'] = output.sql
+#             res['retrieved'] = [doc.metadata['sample_id'] for doc in docs]
+#             res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
+#             results.append(res)
+
+#         with open(prediction_path / f'{file_name}_{db_id}.json', 'w') as f:
+#             json.dump(results, f, indent=4)
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Zero-shot SQL generation with OpenAI')
-    parser.add_argument('--task', type=str, default='zero_shot_hint', help='`create_bo`, `retrieve`, `gen_template`, `fill_in`, `evaluate`')
+    parser.add_argument('--task', type=str, default='retrieve', 
+        help='''
+        `create_bo`, `retrieve`,
+        `gen_template`, `keyword_extraction`, `search_value`, `fill_in`, 
+        `evaluate`, `aggregate`'''
+    )
     parser.add_argument('--ds', type=str, default='spider', help='Dataset to use for training. spider or bird') 
     parser.add_argument('--type', type=str, default='train', help='Type of data to use for .')
-    parser.add_argument('--description_file', type=str, default='description.json', help='File containing the descriptions.')
+    parser.add_argument('--exp_name', type=str, default='experiments', help='Folder to store the experiments')
+    parser.add_argument('--eval_target', type=str, default='direct', 
+                        help='Task to evaluate: `direct`, `fill_in`')
+    parser.add_argument('--with_bos', action='store_true', help='Whether to use BOs or not')
     parser.add_argument('--k_retrieval', type=int, default=5, help='Number of retrievals for reranker to consider')
     parser.add_argument('--n_retrieval', type=int, default=1, help='Number of retrievals to consider')
-    # parser.add_argument('--n_sample', type=int, default=3, help='[type=dev] Number of samples to consider')
-    # parser.add_argument('--n_stop', type=int, default=50, help='[type=dev] Number of samples to stop')
-    # parser.add_argument('--score_threshold', type=float, default=0.60, help='Score threshold for retrieval')
     parser.add_argument('--use_reranker', action='store_true', help='Whether to use reranker or not')
     parser.add_argument('--embedding_model', type=str, default='openai', 
                         help='`openai`, `custom`(`msmarco-MiniLM-L6-cos-v5-q_ba`)')
     parser.add_argument('--reranker_model', type=str, default='cross-encoder/ms-marco-MiniLM-L-6-v2',
                         help='Reranker model to use: `msmarco`(`cross-encoder/ms-marco-MiniLM-L-6-v2`), `custom`(ms-marco-MiniLM-L-6-v2-q_ba-rerank)')
     parser.add_argument('--is_question_query', action='store_true', help='Whether to use question query or not')
-    
-    # valid_bo
-    parser.add_argument('--db_id_group', type=int, default=-1, help='Group of db_ids to consider, < 0 means use all')
-    # test_bo
-    parser.add_argument('--scenario', type=int, default='0', help='Scenario to consider')
-
-    # scenario
-    # (ba-query) 0: 10 | 1: 15 | 2: 25 | (question-query) 4: 25
-    
+    parser.add_argument('--prefix', type=str, default='x-', help='Prefix for the prediction files')
+    parser.add_argument('--num_cpus', type=int, default=3, help='Number of CPUs to evaluate execution results')
+    parser.add_argument('--n_bos_sample', type=int, default=30, help='Number of BOs to sample')
+    parser.add_argument('--n_bos_select', type=int, default=10, help='Number of BOs to select')
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
     assert proj_path.name == 'BusinessObjects', f'Expected project path to be BusinessObjects, but got {proj_path.name}'
     
-    experiment_folder = proj_path / 'experiments' / args.ds
-    prediction_path = experiment_folder / 'predictions' / args.task
-    eval_path = experiment_folder / 'evals' / args.task
-    for p in [prediction_path, eval_path]:
-        if not p.exists():
-            p.mkdir(parents=True)
+    experiment_folder = proj_path / args.exp_name / args.ds
+    
+    if args.task in ['evaluate', 'aggregate']:
+        eval_path = experiment_folder / 'evals'
+        if not eval_path.exists():
+            eval_path.mkdir(parents=True)
+    else:
+        prediction_path = experiment_folder / 'predictions' / args.task
+        if not prediction_path.exists():
+            prediction_path.mkdir(parents=True)
 
     # must load components
+    description_file = 'bird_description.json' if args.ds == 'bird' else 'description.json'
     tables, *_ = load_raw_data(proj_path / 'data' / args.ds, load_test=False)
-    with (proj_path / 'data' / args.description_file).open() as f:
+    with (proj_path / 'data' / description_file).open() as f:
         all_descriptions = json.load(f)
     tables = process_all_tables(tables, descriptions=all_descriptions)
-
-    model_openai = ChatOpenAI(
-        model='gpt-4o-mini',
-        temperature=0.0,
-        frequency_penalty=0.1,
-    )
 
     if args.task == 'create_bo':
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
@@ -581,8 +1111,12 @@ if __name__ == '__main__':
             template=Prompts.bo_description,
             input_variables=['schema', 'virtual_table']
         )
-        
-        model = model_openai.with_structured_output(BODescription)
+        model_openai = ChatOpenAI(
+            model='gpt-4o-mini',
+            temperature=0.3,
+            frequency_penalty=0.1,
+        )
+        model = model_openai.with_structured_output(BODescription, method='json_mode')
         chain = (prompt | model)
 
         create_vt_ba(
@@ -613,7 +1147,7 @@ if __name__ == '__main__':
             prediction_path=prediction_path,
             embedding_model=args.embedding_model,
             reranker_model=args.reranker_model,
-            prefix='x-',
+            prefix=args.prefix,
             k_retrieval=args.k_retrieval,
             n_retrieval=args.n_retrieval,
             use_reranker=args.use_reranker,
@@ -621,28 +1155,78 @@ if __name__ == '__main__':
             is_test=False if args.type == 'dev' else True
         )
 
+        # sample bos to evaluate
+        if args.type == 'dev':
+            retrieval_path: Path = experiment_folder / 'predictions' / 'retrieve' / f'with_bos-{args.type}.json'
+            with retrieval_path.open() as f:
+                retrieved = json.load(f)
+            retrieved_by_db_ids = defaultdict(set)
+            
+            for r in retrieved:
+                db_id = r['db_id']
+                sample_id = r['sample_id']
+                ret = r['retrieved']
+                for s, bo in product([sample_id], ret):
+                    retrieved_by_db_ids[db_id].update(ret)
+            sampled_bos = defaultdict(list)
+            for db_id, bos in retrieved_by_db_ids.items():
+                if len(bos) > args.n_bos_sample:
+                    n_sample = args.n_bos_sample
+                else:
+                    # sample half of the bos
+                    n_sample = len(bos) // 2
+                sampled = np.random.choice(list(bos), n_sample, replace=False).tolist()
+                sampled_bos[db_id].extend(sampled)
+
+            with (experiment_folder / 'predictions' / 'retrieve' / f'with_bos-sampled.json').open('w') as f:
+                json.dump(sampled_bos, f, indent=4)
+
     elif args.task == 'gen_template':
+        # final save file
+        # file_p1 = 'no_bos' if not with_bos else 'with_bos'
+        # file_p2 = 'test' if is_test else 'dev'
+        # file_name = f'{file_p1}-{file_p2}.json'
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        if args.with_bos:
+            bo_path: Path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+            assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+            with bo_path.open() as f:
+                bos = json.load(f)
+            bos = remove_duplicate_bos(bos)
 
-        bo_path: Path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-        assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
-        with bo_path.open() as f:
-            bos = json.load(f)
-        bos = remove_duplicate_bos(bos)
+            file_name = 'with_bos-sampled.json' if args.type == 'dev' else f'with_bos-{args.type}.json' 
+            retrieval_path: Path = experiment_folder / 'predictions' / 'retrieve' / file_name
+            assert retrieval_path.exists(), f'Run with the `task=retrieve, type={args.task}` first'
+            with retrieval_path.open() as f:
+                retrieved = json.load(f)
+            # test: [{db_id, sample_id, retrieved, }]
+            # dev: {db_id: [bo_id1, ...]}
 
-        retrieval_path: Path = experiment_folder / 'predictions' / 'retrieve' / f'retrieval_{args.type}.json'
-        assert retrieval_path.exists(), f'Run with the `task=retrieve, type={args.task}` first'
-        with retrieval_path.open() as f:
-            retrieved = json.load(f)
+        else:
+            bos = {}
+            retrieved = []
 
+        if args.with_bos:
+            prompt_template = Prompts.gen_template_with_bos
+            input_variables = ['schema', 'input_query', 'hint']
+            structured_output = GenTemplateResponse
+        else:
+            prompt_template = Prompts.gen_template_no_bos
+            input_variables = ['schema', 'input_query']
+            structured_output = SQLResponse
+        
         prompt = PromptTemplate(
-            template=Prompts.gen_template,
-            input_variables=['schema', 'input_query', 'hint'],
+            template=prompt_template,
+            input_variables=input_variables,
         )
-
-        model = model_openai.with_structured_output(GenTemplateResponse)
+        model_openai = ChatOpenAI(
+            model='gpt-4o-mini',
+            temperature=0.5,
+            frequency_penalty=0.1,
+        )
+        model = model_openai.with_structured_output(structured_output, method='json_mode')
         chain = (prompt | model)
-
+        
         task_gen_template(
             samples=samples,
             tables=tables,
@@ -650,150 +1234,636 @@ if __name__ == '__main__':
             retrieved=retrieved,
             chain=chain,
             prediction_path=prediction_path,
-            prefix='x-',
+            with_bos=args.with_bos,
+            prefix=args.prefix,
             is_test=False if args.type == 'dev' else True
         )
 
-    elif args.task == 'valid_bo_prepare_batch_run':
+    elif args.task == 'keyword_extraction':
+        # final save file
+        # file_p1 = 'no_bos' if not with_bos else 'with_bos'
+        # file_p2 = 'test' if is_test else 'dev'
+        # file_name = f'{file_p1}-{file_p2}.json'
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-        df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'bird_dev.csv')
-        df_score = df.loc[:, ['sample_id', 'db_id', 'exec_result']]
-        df_error = df_score.loc[df_score['exec_result'] == 0, ['db_id', 'sample_id']]
-        error_ids = df_error['sample_id'].tolist()
-        samples = list(filter(lambda x: x.sample_id in error_ids, samples))
-        
-        with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
-            partial_db_ids = json.load(f)
-        
-        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-        assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
-        with bo_path.open() as f:
-            bos = json.load(f)
 
-        bos = remove_duplicate_bos(bos)
-
-        with open(experiment_folder / f'partial_{args.ds}_db_ids.json', 'w') as f:
-            json.dump(partial_db_ids, f, indent=4)
+        file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
+        template_path = experiment_folder / 'predictions' / 'gen_template' / f'{file_name}.json'
+        assert template_path.exists(), f'Run with the `task=gen_template, type={args.type}` first'
+        with template_path.open() as f:
+            templates = json.load(f)
+            # dev set could have duplicate sample_id that referes to the retrieval process
         
-        sampler = Sampler(bos)
+        # prepare inputs
+        samples_by_id = {s.sample_id: s for s in samples}
+        # same template will have one keyword extraction inference
+        input_samples = []
+        template_sample_id2doc_ids = defaultdict(set)  # template, sample_id: {doc_id}
+        for t in templates:
+            sample_id: int = t['sample_id']
+            doc_ids: list = t['doc_ids']   # [] for no_bos
+            sql_template: str = t['sql_template']
+            key = (sql_template, sample_id)
+            if key not in template_sample_id2doc_ids:
+                sample = samples_by_id[sample_id]
+                x = {
+                    'sample_id': sample_id,
+                    'question': sample.final.question,
+                    'evidence': sample.evidence,
+                    'db_id': sample.db_id,
+                    'sql_template': sql_template,
+                }
+                input_samples.append(x)
+                template_sample_id2doc_ids[key].update(doc_ids)
+
+            for doc_id in doc_ids:
+                template_sample_id2doc_ids[key].add(doc_id)
+
+        if not (args.with_bos and args.type == 'dev'):
+            # dev(with_bos): sample_id + doc_ids (need to evaluate for doc_ids)
+            # dev(no_bos): sample_id
+            # test(both cases): sample_id (under test retrieval number = 1)
+            assert len(template_sample_id2doc_ids) == len(templates), f"{len(template_sample_id2doc_ids)} != {len(templates)}"
         
-        sampled_bos = {}
-        for db_id_group in partial_db_ids:
-            sampled_bos[str(db_id_group)] = defaultdict()
-            for db_id in partial_db_ids[str(db_id_group)]:
-                x_samples = list(filter(lambda x: x.db_id == db_id, samples))
-                for idx_bos, train_bos in enumerate(sampler.sample(db_id, args.n_sample, args.n_stop, rt_idx=False)):
-                    # print(f'{db_id}-{idx_bos} :', f'{len(train_bos)}', f'{len(list(product(train_bos, x_samples)))}')
-                    sampled_bos[str(db_id_group)][f'{db_id}-{idx_bos}'] = {
-                        'train_bos': train_bos,
-                        'n_iter': len(list(product(train_bos, x_samples))), 
-                        'total_bos_in_batch': len(train_bos),
-                        'total_samples_in_batch': len(x_samples)
-                    }
+        del samples_by_id, templates # free memory
 
-        with (experiment_folder / f'partial_{args.ds}_batch.json').open('w') as f:
-            json.dump(sampled_bos, f, indent=4)
-
-    elif args.task == 'valid_bo':
-        # use error sample to validate
-        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-        df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'{args.ds}_dev.csv')
-        df_error = df.loc[df['exec_result'] == 0]
-        error_ids = df_error['sample_id'].tolist()
-        samples = list(filter(lambda x: x.sample_id in error_ids, samples))
-
-        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-        assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
-        with bo_path.open() as f:
-            bos = json.load(f)
-        bos = remove_duplicate_bos(bos)
-
-        batch_file_path = experiment_folder / f'partial_{args.ds}_batch.json'
-        # assert batch_file_path.exists(), 'Run with the `task=create_bo, type=train` first'
-        if (args.db_id_group >= 0) and batch_file_path.exists():
-            with batch_file_path.open() as f:
-                sampled_bos = json.load(f)[str(args.db_id_group)]  
-            # dict["db_id-idx_bo", dict["train_bos", "n_iter", "total_bos_in_batch", "total_samples_in_batch"]]
-        else:
-            raise KeyError('Run with the `task=valid_bo_prepare_batch_run` first')
-        
-        # filter samples with db_ids gorup
-        with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
-            partial_db_ids = json.load(f)
-        samples = list(filter(lambda x: x.db_id in partial_db_ids[str(args.db_id_group)], samples))
-        print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
-        
         prompt = PromptTemplate(
-            template=Prompts.zero_shot_hints_inference,
-            input_variables=['schema', 'input_query', 'hint'],
+            template=Prompts.keyword_extraction,
+            input_variables=['schema', 'input_query', 'evidence', 'sql_template'],
         )
-
-        model = model_openai.with_structured_output(SQLResponse)
+        model_openai = ChatOpenAI(
+            model='gpt-4o-mini',
+            temperature=0.5,
+            frequency_penalty=0.1,
+        )
+        model = model_openai.with_structured_output(KeywordExtractionResponse, method='json_mode')
         chain = (prompt | model)
 
-        valid_bo(
-            samples=samples, 
-            tables=tables, 
-            bos=sampled_bos, 
+        task_keyword_extraction(
+            input_samples=input_samples,
+            template_sample_id2doc_ids=template_sample_id2doc_ids,
+            tables=tables,
             chain=chain,
-            prediction_path=prediction_path, 
-            file_name=f'{args.ds}_{args.type}', 
-            split_k=2,
+            prediction_path=prediction_path,
+            with_bos=args.with_bos,
+            prefix=args.prefix,
+            is_test=False if args.type == 'dev' else True
         )
 
-    elif args.task == 'zero_shot_hint':
-        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-        with bo_path.open() as f:
-            all_bos = json.load(f)
+    elif args.task == 'search_value':
+        # final save file
+        # file_p1 = 'no_bos' if not with_bos else 'with_bos'
+        # file_p2 = 'test' if is_test else 'dev'
+        # file_name = f'{file_p1}-{file_p2}.json'
 
-        # test_scenarios
-        with (experiment_folder / 'test_scenarios.json').open('r') as f:
-                test_scenarios = json.load(f)
+        def _format_column_value(string: str):
+            operations = [
+                '>', '<', '=', '>=', '<=', '!=', '<>'
+            ]
+            found = False
+            for op in operations:
+                if op in string.lower():
+                    found = True
+                    break
             
-        sce = {0: "10", 1: "15", 2: "25", 3: "25"}[args.scenario]
-        test_bo_ids = test_scenarios[sce]
-        test_bos = defaultdict(list)
-        for db_id, bos in all_bos.items():
-            if db_id in test_bo_ids:
-                bo_ids = test_bo_ids[db_id]
-                test_bos[db_id].extend(list(filter(lambda x: x['sample_id'] in bo_ids, bos)))
+            if found:
+                # split the string by the operator
+                string = string.split(op, 1)[-1].strip()
+            
+            # remove ' or " from the string
+            string = string.replace("'", '').replace('"', '')
+            return string
         
-        # (bo-query)
-        if args.scenario in (0, 1, 2):
-            is_question_query = False
-            print('bo-query scenario')
-        # (question-query)
-        elif args.scenario in (3,):
-            is_question_query = True
-            print('question-query scenario')
-        else:
-            print(f'Invalid scenario: {args.scenario}')
-            raise ValueError('Invalid scenario')
-        
-        # args.type == test
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-        samples = [x for x in samples if x.db_id in test_bo_ids]
-        print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
-        
-        prompt = PromptTemplate(
-            template=Prompts.zero_shot_hints_inference,
-            input_variables=['schema', 'input_query', 'hint'],
-        )
 
-        model = model_openai.with_structured_output(SQLResponse)
+        file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
+        keyword_path = experiment_folder / 'predictions' / 'keyword_extraction' / f'{file_name}.json'
+        assert keyword_path.exists(), f'Run with the `task=keyword_extraction, type={args.type}` first'
+        with keyword_path.open() as f:
+            keywords = json.load(f)
+
+        # prepare inputs
+        samples_by_id = {s.sample_id: s for s in samples}
+
+        input_samples = []
+        keyword_sample_id2doc_ids = defaultdict(set) # (all_kws, sample_id): {doc_id}
+        for k in keywords:
+            sample_id: int = k['sample_id']
+            doc_ids: list = k['doc_ids']
+            # process keywords
+            output_kws: dict[str, list[str]] = k['keywords']
+            # lower column and sort and lower keywords first
+            output_kws = {k: sorted([x for x in vs if x]) for k, vs in output_kws.items()}
+            
+            all_kws: dict[str, list[str]] = {}
+            for output_column_name, kws in output_kws.items():
+                if kws:  # only store non-empty keywords
+                    if ('.' in output_column_name): # rewrite the column_name
+                        _, column_name = output_column_name.split('.')
+                    else:
+                        column_name = output_column_name
+                    all_kws[column_name] = [_format_column_value(kw) for kw in kws if kw]
+
+            key = (json.dumps(all_kws), sample_id)
+            if key not in keyword_sample_id2doc_ids:
+                sample = samples_by_id[sample_id]
+                x = {
+                    'sample_id': sample_id,
+                    'db_id': sample.db_id,
+                    'db_file': get_db_file(proj_path, args.ds, sample.db_id),
+                    'search_keywords': all_kws
+                }
+                input_samples.append(x)
+                keyword_sample_id2doc_ids[key].update(doc_ids)
+
+            for doc_id in doc_ids:
+                keyword_sample_id2doc_ids[key].add(doc_id)
+
+        if not (args.with_bos and args.type == 'dev'):
+            # dev(with_bos): sample_id + doc_ids (need to evaluate for doc_ids)
+            # dev(no_bos): sample_id
+            # test(both cases): sample_id (under test retrieval number = 1)
+            assert len(keyword_sample_id2doc_ids) == len(keywords), f"{len(keyword_sample_id2doc_ids)} != {len(keywords)}"
+        del samples_by_id, keywords # free memory
+
+        task_search_value(
+            input_samples=input_samples,
+            keyword_sample_id2doc_ids=keyword_sample_id2doc_ids,
+            prediction_path=prediction_path,
+            with_bos=args.with_bos,
+            prefix=args.prefix,
+            is_test=False if args.type == 'dev' else True
+        )
+        
+    elif args.task == 'fill_in':
+        # final save file
+        # file_p1 = 'no_bos' if not with_bos else 'with_bos'
+        # file_p2 = 'test' if is_test else 'dev'
+        # file_name = f'{file_p1}-{file_p2}.json'
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+
+        file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
+        values_path = experiment_folder / 'predictions' / 'search_value' / f'{file_name}.json'
+        assert values_path.exists(), f'Run with the `task=search_value, type={args.type}` first'
+        with values_path.open() as f:
+            searched_values = json.load(f)
+
+        template_path = experiment_folder / 'predictions' / 'gen_template' / f'{file_name}.json'
+        assert template_path.exists(), f'Run with the `task=gen_template, type={args.type}` first'
+        with template_path.open() as f:
+            templates = json.load(f)
+
+        # prepare inputs
+        samples_by_id = {s.sample_id: s for s in samples}
+        values_by_id = {v['sample_id']: v for v in searched_values}
+        # same template will have one keyword extraction inference
+        input_samples = []
+        template_values_sample_id2doc_ids = defaultdict(set)  # template, sample_id: {doc_id}
+        for t in templates:
+            sample_id: int = t['sample_id']
+            doc_ids: list = t['doc_ids']   # [] for no_bos
+            sql_template: str = t['sql_template']
+            values = values_by_id[sample_id]['values'] if values_by_id.get(sample_id) else {}
+            # sort values
+            if values:
+                values = {
+                    table_name: {column_name: sorted(vs) for column_name, vs in column_values.items()}
+                        for table_name, column_values in values.items()}
+            key = (sql_template, json.dumps(values), sample_id)
+            if key not in template_values_sample_id2doc_ids:
+                sample = samples_by_id[sample_id]
+                x = {
+                    'sample_id': sample_id,
+                    'db_id': sample.db_id,
+                    'question': sample.final.question,
+                    'values': values,
+                    'sql_template': sql_template,
+                }
+                input_samples.append(x)
+                template_values_sample_id2doc_ids[key].update(doc_ids)
+
+            for doc_id in doc_ids:
+                template_values_sample_id2doc_ids[key].add(doc_id)
+
+        print(f'Number of input samples: {len(template_values_sample_id2doc_ids)}')
+        # keys = list(template_values_sample_id2doc_ids.keys())
+        # selected = np.random.choice(list(range(len(keys))), 5, replace=False)
+        # for i in selected:
+        #     key = keys[i]
+        #     print(f'# of doc_ids: {len(template_values_sample_id2doc_ids[key])}')
+
+        if not (args.with_bos and args.type == 'dev'):
+            # dev(with_bos): sample_id + doc_ids (need to evaluate for doc_ids)
+            # dev(no_bos): sample_id
+            # test(both cases): sample_id (under test retrieval number = 1)
+            assert len(template_values_sample_id2doc_ids) == len(templates), f"{len(template_values_sample_id2doc_ids)} != {len(templates)}"
+
+        del samples_by_id, values_by_id, templates, searched_values # free memory
+
+        prompt = PromptTemplate(
+            template=Prompts.fill_in,
+            input_variables=['schema', 'input_query', 'hint', 'sql_template'],
+        )
+        model_openai = ChatOpenAI(
+            model='gpt-4o-mini',
+            temperature=0.3,
+            frequency_penalty=0.1,
+        )
+        model = model_openai.with_structured_output(SQLResponse, method='json_mode')
         chain = (prompt | model)
 
-        predict_sql_bo(
-            samples=samples, 
-            tables=tables, 
-            test_bos=test_bos, 
+        task_fill_in(
+            input_samples=input_samples,
+            template_values_sample_id2doc_ids=template_values_sample_id2doc_ids,
+            tables=tables,
             chain=chain,
-            prediction_path=prediction_path, 
-            file_name=f'{args.ds}_{args.type}_{args.scenario}', 
-            split_k=3,
-            k_retrieval=args.k_retrieval,
-            n_retrieval=args.n_retrieval,
-            score_threshold=args.score_threshold,
-            use_reranker=args.use_reranker,
-            is_question_query=is_question_query
+            prediction_path=prediction_path,
+            with_bos=args.with_bos,
+            prefix=args.prefix,
+            is_test=False if args.type == 'dev' else True
         )
+        
+    elif args.task == 'evaluate':
+        def parse_sql_to_output(sql: str, schema: Schema):
+            try:
+                ei = extract_all(sql, schema)
+                assert len(ei['sel']) > 0, f'No selection found'
+            except Exception as e:
+                return None
+            return ei
+        
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+
+        file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
+        eval_target_path = experiment_folder / 'predictions' / args.eval_target / f'{file_name}.json'
+        assert eval_target_path.exists(), f'Run with the `task={args.eval_target}, type={args.type}` first'
+        with eval_target_path.open() as f:
+            eval_targets = json.load(f)
+
+        parsed_queries_path: Path = eval_path / f'parsed_queries-{file_name}.pkl'
+        parsed_queries_exist = parsed_queries_path.exists()
+        if parsed_queries_exist:
+            with parsed_queries_path.open('rb') as f:
+                parsed_queries = pickle.load(f)
+        else:
+            parsed_queries = defaultdict(dict)
+            parsed_queries['unable'] = set()
+
+        samples_by_id = {s.sample_id: s for s in samples}
+        eval_data: dict[str, list] = defaultdict(list)
+        eval_data2doc_ids = defaultdict(set)
+
+        # from flatten to nested by doc_ids
+        for pred in tqdm(eval_targets, total=len(eval_targets), desc='preparing eval data'):
+            sample_id = pred['sample_id']
+            pred_sql = pred['sql']
+            doc_ids = pred['doc_ids']
+            target_sample = samples_by_id[sample_id]
+            target_sql = target_sample.final.sql
+            db_id = target_sample.db_id
+            key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
+
+            if not parsed_queries_exist:
+                schema = Schema(tables[db_id].db_schema)
+                if parsed_queries['target'].get(target_sql) is None:
+                    target_output = parse_sql_to_output(target_sql, schema)
+                    parsed_queries['target'][target_sql] = target_output
+                else:
+                    target_output = parsed_queries['target'][target_sql]
+                if parsed_queries['pred'].get(pred_sql) is None:
+                    pred_output = parse_sql_to_output(pred_sql, schema)
+                    parsed_queries['pred'][pred_sql] = pred_output
+                else:
+                    pred_output = parsed_queries['pred'][pred_sql]
+            
+                if (not pred_output) or (not target_output):
+                    if key not in parsed_queries['unable']:
+                        parsed_queries['unable'].add(key)
+                    continue
+            else:
+                if key in parsed_queries['unable']:
+                    continue
+            
+            if key not in eval_data2doc_ids:
+                eval_data['sample_ids'].append(sample_id)
+                eval_data['target_queries'].append(target_sql)
+                eval_data['db_paths'].append(get_db_file(proj_path, args.ds, db_id))
+                eval_data['pred_queries'].append(pred_sql)
+                eval_data2doc_ids[key].update(doc_ids)
+
+            for doc_id in doc_ids:
+                eval_data2doc_ids[key].add(doc_id)
+
+        if not parsed_queries_exist:
+            with parsed_queries_path.open('wb') as f:
+                pickle.dump(parsed_queries, f)
+
+        del samples_by_id, eval_targets # free memory
+
+        # execution evaluation
+        logging.info(f'Evaluation data loaded: {len(eval_data["sample_ids"])} samples')
+        execution_result_path = eval_path / f'execution_result-{file_name}.json'
+        if execution_result_path.exists():
+            logging.info('Execution result exists, skip evaluation')
+        else:
+            evaluate_exec(
+                eval_data,
+                eval_data2doc_ids,
+                execution_result_path,
+                num_cpus=args.num_cpus,
+                meta_time_out=30.0
+            )
+
+        # semantic and structural evaluation
+        merit_result_path = eval_path / f'merit_result-{file_name}.json'
+        if merit_result_path.exists():
+            logging.info('Merits result exists, skip evaluation')
+        else:
+            evaluate_merit(
+                eval_data, 
+                eval_data2doc_ids,
+                parsed_queries,
+                merit_result_path
+            )
+    
+    elif args.task == 'aggregate':
+        file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
+
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        db_ids = {s.sample_id: s.db_id for s in samples}
+        
+        if args.with_bos:  # whether to use BOs or not
+            with open(experiment_folder / 'predictions' / 'retrieve' / f'{file_name}.json', 'r') as f:
+                retrieved = json.load(f)
+            retrieved = {r['sample_id']: r for r in retrieved}
+        else:
+            retrieved = {}
+
+        if args.eval_target == 'fill_in':  # pipeline method
+            # gen_template
+            with open(experiment_folder / 'predictions' / 'gen_template' / f'{file_name}.json', 'r') as f:
+                sql_templates = json.load(f)
+            sql_templates = {r['sample_id']: r for r in sql_templates}
+
+            # keyword_extraction
+            with open(experiment_folder / 'predictions' / 'keyword_extraction' / f'{file_name}.json', 'r') as f:
+                keyword_extraction = json.load(f)
+            keyword_extraction = {r['sample_id']: r for r in keyword_extraction}
+
+            # search_value
+            with open(experiment_folder / 'predictions' / 'search_value' / f'{file_name}.json', 'r') as f:
+                search_value = json.load(f)
+            search_value = {r['sample_id']: r for r in search_value}
+        else:
+            sql_templates = {}
+            keyword_extraction = {}
+            search_value = {}
+
+        with open(experiment_folder / 'evals' / f'execution_result-{file_name}.json', 'r') as f:
+            exec_results = json.load(f)
+        exec_results = {r['sample_id']: r for r in exec_results}
+
+        with open(experiment_folder / 'evals' / f'merit_result-{file_name}.json', 'r') as f:
+            merit_results = json.load(f)
+        merit_results = {r['sample_id']: r for r in merit_results}
+
+        all_results = defaultdict(list)
+
+        for sample_id in merit_results.keys():
+            all_results['sample_id'].append(sample_id)
+            all_results['db_id'].append(db_ids[sample_id])
+            if args.with_bos:
+                bo_ids = ','.join(map(str, retrieved[sample_id]['retrieved']))
+                bo_used = int(sql_templates[sample_id]['hint_used'])
+                all_results['bo_ids'].append(bo_ids)
+                all_results['bo_used'].append(bo_used)
+
+            if args.eval_target == 'fill_in':
+                keywords = json.dumps({column_name: kws for column_name, kws in keyword_extraction[sample_id]['keywords'].items() if kws})
+                # keywords = False if keywords == '{}' else True
+                values = json.dumps(search_value[sample_id]['values'])
+                # values = False if values == '{}' else True
+                all_results['keywords'].append(keywords)
+                all_results['values'].append(values)
+            all_results['exec_res'].append(exec_results[sample_id]['res'])
+            all_results['structural_score'].append(merit_results[sample_id]['structural_score'])
+            all_results['semantic_score'].append(merit_results[sample_id]['semantic_score'])
+            all_results['f1_score'].append(merit_results[sample_id]['f1_score'])
+            all_results['target_complexity'].append(merit_results[sample_id]['target_complexity'])
+        
+        df = pd.DataFrame(all_results)
+        df.to_csv(eval_path / f'result-{file_name}.csv', index=False)
+
+    elif args.task == 'direct':
+        samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        
+        file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
+        if args.with_bos:
+            bo_path: Path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+            assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+            with bo_path.open() as f:
+                bos = json.load(f)
+            bos = remove_duplicate_bos(bos)
+
+            file_name = 'with_bos-sampled.json' if args.type == 'dev' else f'with_bos-{args.type}.json' 
+            retrieval_path: Path = experiment_folder / 'predictions' / 'retrieve' / file_name
+            assert retrieval_path.exists(), f'Run with the `task=retrieve, type={args.task}` first'
+            with retrieval_path.open() as f:
+                retrieved = json.load(f)
+            # test: [{db_id, sample_id, retrieved, }]
+            # dev: {db_id: [bo_id1, ...]}
+
+        else:
+            bos = {}
+            retrieved = []
+
+        if args.with_bos:
+            prompt_template = Prompts.zero_shot_hints_inference
+            input_variables = ['schema', 'input_query', 'hint']
+            structured_output = DirectSQLResponse
+        else:
+            prompt_template = Prompts.zero_shot_inference
+            input_variables = ['schema', 'input_query']
+            structured_output = SQLResponse
+        
+        prompt = PromptTemplate(
+            template=prompt_template,
+            input_variables=input_variables,
+        )
+        model_openai = ChatOpenAI(
+            model='gpt-4o-mini',
+            temperature=0.5,
+            frequency_penalty=0.1,
+        )
+        model = model_openai.with_structured_output(structured_output, method='json_mode')
+        chain = (prompt | model)
+        
+        task_gen_template(
+            samples=samples,
+            tables=tables,
+            bos=bos,
+            retrieved=retrieved,
+            chain=chain,
+            prediction_path=prediction_path,
+            with_bos=args.with_bos,
+            prefix=args.prefix,
+            is_test=False if args.type == 'dev' else True
+        )
+
+        # change sql_template key to sql
+        file_p1 = 'no_bos' if not args.with_bos else 'with_bos'
+        file_p2 = args.type
+        file_name = f'{file_p1}-{file_p2}.json'
+        
+        with open(prediction_path / file_name, 'r') as file:
+            all_results = json.load(file)
+            
+        for r in all_results:
+            r['sql'] = r.pop('sql_template')
+
+        with open(prediction_path / file_name, 'w') as file:
+            json.dump(all_results, file, indent=4)
+
+    # elif args.task == 'valid_bo_prepare_batch_run':
+    #     samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+    #     df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'bird_dev.csv')
+    #     df_score = df.loc[:, ['sample_id', 'db_id', 'exec_result']]
+    #     df_error = df_score.loc[df_score['exec_result'] == 0, ['db_id', 'sample_id']]
+    #     error_ids = df_error['sample_id'].tolist()
+    #     samples = list(filter(lambda x: x.sample_id in error_ids, samples))
+        
+    #     with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
+    #         partial_db_ids = json.load(f)
+        
+    #     bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+    #     assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+    #     with bo_path.open() as f:
+    #         bos = json.load(f)
+
+    #     bos = remove_duplicate_bos(bos)
+
+    #     with open(experiment_folder / f'partial_{args.ds}_db_ids.json', 'w') as f:
+    #         json.dump(partial_db_ids, f, indent=4)
+        
+    #     sampler = Sampler(bos)
+        
+    #     sampled_bos = {}
+    #     for db_id_group in partial_db_ids:
+    #         sampled_bos[str(db_id_group)] = defaultdict()
+    #         for db_id in partial_db_ids[str(db_id_group)]:
+    #             x_samples = list(filter(lambda x: x.db_id == db_id, samples))
+    #             for idx_bos, train_bos in enumerate(sampler.sample(db_id, args.n_sample, args.n_stop, rt_idx=False)):
+    #                 # print(f'{db_id}-{idx_bos} :', f'{len(train_bos)}', f'{len(list(product(train_bos, x_samples)))}')
+    #                 sampled_bos[str(db_id_group)][f'{db_id}-{idx_bos}'] = {
+    #                     'train_bos': train_bos,
+    #                     'n_iter': len(list(product(train_bos, x_samples))), 
+    #                     'total_bos_in_batch': len(train_bos),
+    #                     'total_samples_in_batch': len(x_samples)
+    #                 }
+
+    #     with (experiment_folder / f'partial_{args.ds}_batch.json').open('w') as f:
+    #         json.dump(sampled_bos, f, indent=4)
+
+    # elif args.task == 'valid_bo':
+    #     # use error sample to validate
+    #     samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+    #     df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'{args.ds}_dev.csv')
+    #     df_error = df.loc[df['exec_result'] == 0]
+    #     error_ids = df_error['sample_id'].tolist()
+    #     samples = list(filter(lambda x: x.sample_id in error_ids, samples))
+
+    #     bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+    #     assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+    #     with bo_path.open() as f:
+    #         bos = json.load(f)
+    #     bos = remove_duplicate_bos(bos)
+
+    #     batch_file_path = experiment_folder / f'partial_{args.ds}_batch.json'
+    #     # assert batch_file_path.exists(), 'Run with the `task=create_bo, type=train` first'
+    #     if (args.db_id_group >= 0) and batch_file_path.exists():
+    #         with batch_file_path.open() as f:
+    #             sampled_bos = json.load(f)[str(args.db_id_group)]  
+    #         # dict["db_id-idx_bo", dict["train_bos", "n_iter", "total_bos_in_batch", "total_samples_in_batch"]]
+    #     else:
+    #         raise KeyError('Run with the `task=valid_bo_prepare_batch_run` first')
+        
+    #     # filter samples with db_ids gorup
+    #     with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
+    #         partial_db_ids = json.load(f)
+    #     samples = list(filter(lambda x: x.db_id in partial_db_ids[str(args.db_id_group)], samples))
+    #     print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
+        
+    #     prompt = PromptTemplate(
+    #         template=Prompts.zero_shot_hints_inference,
+    #         input_variables=['schema', 'input_query', 'hint'],
+    #     )
+
+    #     model = model_openai.with_structured_output(SQLResponse, method='json_mode')
+    #     chain = (prompt | model)
+
+    #     valid_bo(
+    #         samples=samples, 
+    #         tables=tables, 
+    #         bos=sampled_bos, 
+    #         chain=chain,
+    #         prediction_path=prediction_path, 
+    #         file_name=f'{args.ds}_{args.type}', 
+    #         split_k=2,
+    #     )
+
+    # elif args.task == 'zero_shot_hint':
+    #     bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+    #     with bo_path.open() as f:
+    #         all_bos = json.load(f)
+
+    #     # test_scenarios
+    #     with (experiment_folder / 'test_scenarios.json').open('r') as f:
+    #             test_scenarios = json.load(f)
+            
+    #     sce = {0: "10", 1: "15", 2: "25", 3: "25"}[args.scenario]
+    #     test_bo_ids = test_scenarios[sce]
+    #     test_bos = defaultdict(list)
+    #     for db_id, bos in all_bos.items():
+    #         if db_id in test_bo_ids:
+    #             bo_ids = test_bo_ids[db_id]
+    #             test_bos[db_id].extend(list(filter(lambda x: x['sample_id'] in bo_ids, bos)))
+        
+    #     # (bo-query)
+    #     if args.scenario in (0, 1, 2):
+    #         is_question_query = False
+    #         print('bo-query scenario')
+    #     # (question-query)
+    #     elif args.scenario in (3,):
+    #         is_question_query = True
+    #         print('question-query scenario')
+    #     else:
+    #         print(f'Invalid scenario: {args.scenario}')
+    #         raise ValueError('Invalid scenario')
+        
+    #     # args.type == test
+    #     samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+    #     samples = [x for x in samples if x.db_id in test_bo_ids]
+    #     print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
+        
+    #     prompt = PromptTemplate(
+    #         template=Prompts.zero_shot_hints_inference,
+    #         input_variables=['schema', 'input_query', 'hint'],
+    #     )
+
+    #     model = model_openai.with_structured_output(SQLResponse, method='json_mode')
+    #     chain = (prompt | model)
+
+    #     predict_sql_bo(
+    #         samples=samples, 
+    #         tables=tables, 
+    #         test_bos=test_bos, 
+    #         chain=chain,
+    #         prediction_path=prediction_path, 
+    #         file_name=f'{args.ds}_{args.type}_{args.scenario}', 
+    #         split_k=3,
+    #         k_retrieval=args.k_retrieval,
+    #         n_retrieval=args.n_retrieval,
+    #         score_threshold=args.score_threshold,
+    #         use_reranker=args.use_reranker,
+    #         is_question_query=is_question_query
+    #     )

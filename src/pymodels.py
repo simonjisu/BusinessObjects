@@ -6,16 +6,33 @@ class Description(BaseModel):
 
 class SQLResponse(BaseModel):
     sql: str = Field(description='The full SQL query.')
-    rationale: list[str] = Field(description='The step-by-step reasoning to generate the SQL query. ')
+    rationale: list[str]|str = Field(description='The step-by-step reasoning to generate the SQL query. ')
 
 class GenTemplateResponse(BaseModel):
     sql: str = Field(description='The SQL query template.')
-    rationale: list[str] = Field(description='The step-by-step reasoning to generate the SQL query template. ')
+    rationale: list[str]|str = Field(description='The step-by-step reasoning to generate the SQL query template. ')
     hint_used: bool = Field(description='Whether you used the hint or not.')
+
+class DirectSQLResponse(BaseModel):
+    sql: str = Field(description='The full SQL query.')
+    rationale: list[str]|str = Field(description='The step-by-step reasoning to generate the SQL query template. ')
+    hint_used: bool = Field(description='Whether you used the hint or not.')
+
+class KeywordExtractionResponse(BaseModel):
+    """Keyword Extraction Response
+    ```JSON
+    {{
+        "rationale": "<list[str]: the step-by-step reasoning for the extraction>",
+        "extraction": "<dict[str, list[str]]: keys for the dictionary are column names and values are list of keywords, keyphrases, and named entities extracted from the question, hint and sql template>",
+    }}
+    ```
+    """
+    rationale: list[str]|str = Field(description="the step-by-step reasoning for the extraction"),
+    extraction: dict[str, list[str|int|None]] = Field(description='The extracted keywords from the question, hint, and SQL template.')
 
 class BODescription(BaseModel):
     description: str = Field(description='The a clear and concise summary of the complex data model.')
-    rationale: list[str] = Field(description='The step-by-step reasoning to generate the SQL query.')
+    rationale: list[str]|str = Field(description='The step-by-step reasoning to generate the SQL query.')
 
 class DatabaseModel(BaseModel):
     db_id: str

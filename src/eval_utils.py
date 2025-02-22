@@ -2,6 +2,8 @@ import warnings
 import sqlglot
 from sqlglot import expressions as exp
 
+import sys
+import io
 import numpy as np
 import random
 
@@ -17,18 +19,20 @@ from scipy.optimize import linear_sum_assignment
 from transformers import logging as tfloggings
 tfloggings.set_verbosity_error()
 from itertools import product, pairwise
-
+from func_timeout import func_timeout, FunctionTimedOut
+import multiprocessing as mp
+from sqlite3 import OperationalError
+import contextlib
 # import spacy
 # try:
 #     NLP_SPACY = spacy.load('en_core_web_md')
 # except OSError:
 #     from spacy.cli import download
 #     download('en_core_web_md')
-
+import logging
 from bert_score import score as bscore
 from src.database import SqliteDatabase
-from src.pymodels import DatabaseModel
-
+      
 def partial_match(gold_set: set, predict_set: set):
     intersection = gold_set.intersection(predict_set)
     union = gold_set.union(predict_set)
@@ -222,11 +226,14 @@ def get_all_structural_score(
         criteria: str='tsed',
         penalty: float = 0.01,
     ) -> list[float]:
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
     args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
     assert build_type in ['apted', 'zss'], f'build_type should be either apted or zss, but got {build_type}'
     assert criteria in ['tsed', 'distance'], f'criteria should be either tsed or distance, but got {criteria}'
     
     structure_scores = []
+    assert len(source_outputs) == len(target_outputs), 'source_outputs and target_outputs should have the same length'
+    logging.info(f'Computing structural scores for {len(source_outputs)} samples')
     for source_output, target_output in zip(source_outputs, target_outputs):
         if source_output:
             results = {}
@@ -258,6 +265,9 @@ def get_all_structural_score(
         else:
             overall_score = 0.0
         structure_scores.append(overall_score)
+
+    # close logging
+    logging.shutdown()
     return structure_scores
 
 def get_all_semantic_score(
@@ -268,11 +278,13 @@ def get_all_semantic_score(
         rescale_with_baseline: bool=True,
         criteria: str='tsed',
     ):
+    logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
     args = ['table_asts', 'sel_asts', 'cond_asts', 'agg_asts', 'orderby_asts', 'subqueries', 'distinct', 'limit']
 
     all_pairs = []
     all_idxes = defaultdict(dict)
     all_results = defaultdict(dict)
+    logging.info(f'Computing semantic scores for {len(source_outputs)} samples')
     for k, (source_output, target_output) in enumerate(zip(source_outputs, target_outputs)):
         for arg in args:
             # if not source_output:
@@ -328,6 +340,7 @@ def get_all_semantic_score(
                 source_str_list.extend(s_str)
                 target_str_list.extend(t_str)
         with warnings.catch_warnings(action='ignore'):
+            logging.info('Computing BERTScore')
             *_, F1 = bscore(source_str_list, target_str_list, lang='en', verbose=False, rescale_with_baseline=rescale_with_baseline, device='cuda')
         scores = F1.numpy()
     else:
@@ -354,7 +367,8 @@ def get_all_semantic_score(
         epsilon = 1e-9
         overall_score = np.round(np.mean(scores + epsilon), decimals=4)
         semantic_scores.append(overall_score)
-
+    
+    logging.shutdown()
     return semantic_scores
 
 def get_partial_score(
@@ -564,13 +578,83 @@ def check_if_exists_orderby(sql):
     return False
 
 
+def execute_sql(
+    pred: str, target: str, db_file: str, max_rows=100000
+):
+    db = SqliteDatabase(db_file=db_file)
+    try:
+        target_res = db.execute(target, rt_pandas=False)
+        if len(target_res) > max_rows:
+            target_res = target_res[:max_rows]
+        target_error = False
+    except OperationalError as e:
+        target_error = True
 
+    try:
+        pred_res = db.execute(pred, rt_pandas=False)
+        if len(pred_res) > max_rows:
+            pred_res = pred_res[:max_rows]
+        exists_orderby = check_if_exists_orderby(target)
+        res = int(result_eq(pred_res, target_res, order_matters=exists_orderby))
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except Exception as e:
+        res = 0
+        target_error = False
+    return res, target_error
 
+def execute_model(
+    pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float
+):
+    try:
+        with contextlib.redirect_stderr(io.StringIO()):
+            res, target_error = func_timeout(
+                meta_time_out,
+                execute_sql,
+                args=(pred, target, db_file),
+            )
+    except KeyboardInterrupt:
+        sys.exit(0)
+    except FunctionTimedOut:
+        result = [(f"timeout",)]
+        res = 0
+        target_error = False
+    except Exception as e:
+        result = [(f"error",)]  # possibly len(query) > 512 or not executable
+        res = 0
+        target_error = False
+    
+    result = {"sample_id": sample_id, "res": res, "target_error": target_error}
+    return result
 
+def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
+    sample_ids = eval_data['sample_ids']
+    pred_queries = eval_data['pred_queries']
+    target_queries = eval_data['target_queries']
+    db_paths = eval_data['db_paths']
 
+    exec_result = []
+    pbar = tqdm(total=len(sample_ids))
+    pool = mp.Pool(processes=num_cpus)
 
+    def update(result):
+        exec_result.append(result)
+        pbar.update(1)
 
-
+    for sample_id, pred, target, db_file in zip(
+        sample_ids, pred_queries, target_queries, db_paths,
+    ):
+        pool.apply_async(
+            execute_model,
+            args=(
+                pred, target, db_file, sample_id, meta_time_out,
+            ),
+            callback=update,
+        )
+    pool.close()
+    pool.join()
+    
+    return exec_result
 
 
 if __name__ == '__main__':

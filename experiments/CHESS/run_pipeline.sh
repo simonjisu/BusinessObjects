@@ -1,1 +1,0 @@
-sh run/run_main_test.sh

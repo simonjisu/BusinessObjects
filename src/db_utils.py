@@ -1,4 +1,20 @@
 from typing import Optional
+from pathlib import Path
+
+def get_db_file(proj_path: Path, ds: str, db_id: str):
+    if ds == 'spider':
+        db_file = str(proj_path / 'data' / ds / 'database' / db_id / f'{db_id}.sqlite')
+    elif ds == 'bird':
+        bird_train_db_ids = [p.stem for p in (proj_path / 'data' / ds / 'train' / 'train_databases').glob('*')]
+        bird_dev_db_ids = [p.stem for p in (proj_path / 'data' / ds / 'dev' / 'dev_databases').glob('*')]
+    
+        if db_id in bird_train_db_ids:
+            db_file = str(proj_path / 'data' / ds / 'train' / 'train_databases' / db_id / f'{db_id}.sqlite')
+        elif db_id in bird_dev_db_ids:
+            db_file = str(proj_path / 'data' / ds / 'dev' / 'dev_databases' / db_id  / f'{db_id}.sqlite')
+        else:
+            raise ValueError(f'Unknown db_id {db_id}')
+    return db_file
 
 def is_lack_semantic_meanings(col: str, col_exp: str) -> bool:
     col = col.lower()
@@ -183,3 +199,8 @@ def _lower_keys(d: dict[str, dict[str, str]]) -> dict:
     for k, v in d.items():
         new_d[k.lower()] = {k.lower(): v for k, v in v.items()}
     return new_d
+
+def format_raw_sql(raw_sql: str) -> str:
+    # replace '`' to '"'
+    raw_sql = raw_sql.replace('`', '"')
+    return raw_sql

@@ -39,7 +39,7 @@ BIRD / Spider
     * dev-no_bos:
         * 1_gen_templates: Yes / 
         * 2_keyword_extraction: Yes / 
-        * 3_search_value: 
+        * 3_search_value: Yes /
         * 4_fill_in: 
         * 5_evaluate: 
         * 6_aggregate:  
