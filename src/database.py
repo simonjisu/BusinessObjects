@@ -16,6 +16,7 @@ from threading import Lock
 from langchain_chroma import Chroma
 from langchain.schema.document import Document
 
+
 import pickle
 from datasketch import MinHash, MinHashLSH
 from pathlib import Path
@@ -25,6 +26,8 @@ from typing import Dict, Tuple, List, Any, Callable
 from langchain_openai import OpenAIEmbeddings
 from langchain_huggingface import HuggingFaceEmbeddings
 import multiprocessing as mp
+from dotenv import load_dotenv, find_dotenv
+_ = load_dotenv(find_dotenv())
 
 EMBEDDING_FUNCTION = OpenAIEmbeddings(model="text-embedding-3-large")
 HUGGING_FACE_EMBEDDING_FUNCTION = HuggingFaceEmbeddings(model_name="sentence-transformers/all-MiniLM-L6-v2")
