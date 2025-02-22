@@ -10,6 +10,7 @@ from collections import defaultdict
 from itertools import product
 import logging
 import hashlib
+import gc
 
 from copy import deepcopy
 from dotenv import load_dotenv, find_dotenv
@@ -760,7 +761,6 @@ def evaluate_exec(
         batch_preds = [x for x in batch_eval_data['pred_queries']]
         batch_sample_ids = [x for x in batch_eval_data['sample_ids']]
         batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
-        del batch_eval_data  # free memory
         assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
        
         for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
@@ -778,6 +778,10 @@ def evaluate_exec(
 
         with open(eval_path / f'temp-{batch_i}.json', 'w') as f:
             json.dump(batch_results, f, indent=4)
+
+        # free memory
+        del batch_eval_data, batch_results, batch_exec_result, batch_sample_ids, batch_preds
+        gc.collect()
 
     final_results = []
     for i in range(len(batches)):
