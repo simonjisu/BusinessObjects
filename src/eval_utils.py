@@ -6,7 +6,7 @@ import sys
 import io
 import numpy as np
 import random
-
+import gc
 from tqdm import tqdm
 from pathlib import Path
 from collections import defaultdict
@@ -579,21 +579,18 @@ def check_if_exists_orderby(sql):
 
 
 def execute_sql(
-    pred: str, target: str, db_file: str, max_rows=100000
+    pred: str, target: str, db_file: str, max_rows=10000
 ):
     db = SqliteDatabase(db_file=db_file)
     try:
-        target_res = db.execute(target, rt_pandas=False)
-        if len(target_res) > max_rows:
-            target_res = target_res[:max_rows]
+        target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
+        target_res = db.execute(target_sql, rt_pandas=False)
         target_error = False
     except OperationalError as e:
         target_error = True
-
     try:
-        pred_res = db.execute(pred, rt_pandas=False)
-        if len(pred_res) > max_rows:
-            pred_res = pred_res[:max_rows]
+        pred_sql = f'SELECT * FROM ({pred}) LIMIT {max_rows};'  # avoid to load too many rows
+        pred_res = db.execute(pred_sql, rt_pandas=False)
         exists_orderby = check_if_exists_orderby(target)
         res = int(result_eq(pred_res, target_res, order_matters=exists_orderby))
     except KeyboardInterrupt:
@@ -651,6 +648,7 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
             ),
             callback=update,
         )
+        
     pool.close()
     pool.join()
     
