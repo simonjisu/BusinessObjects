@@ -669,47 +669,44 @@ def worker_execute_sql(q: mp.Queue, pred: str, target: str, db_file: str):
         logging.error(f"Worker {os.getpid()}: Exception in worker_execute_sql: {e}")
         q.put((0, False))
 
-def aexecute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float):
-    """
-    Executes the SQL queries with a timeout by running the work in a separate process.
-    If the worker process does not finish within meta_time_out seconds, it is forcefully terminated.
-    Returns a dictionary with the sample_id, res, and target_error.
-    """
+def aexecute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float, order: int):
     pid = os.getpid()
-    logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id}")
-    q = mp.Queue()
-    p = mp.Process(target=worker_execute_sql, args=(q, pred, target, db_file))
-    p.start()
-    p.join(timeout=meta_time_out)
-    
-    if p.is_alive():
-        logging.warning(f"Worker {pid}: Execution timed out for sample_id {sample_id}. Terminating process {p.pid}.")
-        p.terminate()
-        p.join()
-        gc.collect()
+    logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id} (order {order})")
+    try:
+        res, target_error = func_timeout(
+            meta_time_out,
+            execute_sql,
+            args=(pred, target, db_file)
+        )
+    except KeyboardInterrupt:
+        logging.info(f"Worker {pid}: Received KeyboardInterrupt. Exiting.")
+        sys.exit(0)
+    except FunctionTimedOut:
+        logging.warning(f"Worker {pid}: FunctionTimedOut for sample_id {sample_id} (order {order}) after {meta_time_out} seconds.")
         res, target_error = 0, False
-    else:
-        try:
-            res, target_error = q.get_nowait()
-        except Exception as e:
-            logging.error(f"Worker {pid}: Error retrieving result for sample_id {sample_id}: {e}")
-            res, target_error = 0, False
+        gc.collect()
+    except Exception as e:
+        logging.error(f"Worker {pid}: Exception in execute_model for sample_id {sample_id} (order {order}): {e}")
+        res, target_error = 0, False
+    finally:
+        logging.info(f"Worker {pid}: Finished execute_model for sample_id {sample_id} (order {order}) with res={res}, target_error={target_error}")
+    
+    # Include the order in the returned result
+    return {"order": order, "sample_id": sample_id, "res": res, "target_error": target_error}
 
-    logging.info(f"Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
-    return {"sample_id": sample_id, "res": res, "target_error": target_error}
 
 def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
     """
     Runs execute_model in parallel using a multiprocessing Pool.
     Uses a tqdm progress bar to track overall progress.
     """
-    sample_ids   = eval_data['sample_ids']
+    sample_ids = eval_data['sample_ids']
     pred_queries = eval_data['pred_queries']
     target_queries = eval_data['target_queries']
-    db_paths     = eval_data['db_paths']
+    db_paths = eval_data['db_paths']
 
     exec_results = []
-    pbar = tqdm(total=len(sample_ids), desc="Processing execution")
+    pbar = tqdm(total=len(sample_ids), desc="Processing execution", position=0)
     # Create a pool that recycles workers after each task to help release memory.
     pool = mp.Pool(processes=num_cpus, maxtasksperchild=1)
 
@@ -717,11 +714,12 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
         exec_results.append(result)
         pbar.update(1)
 
-    for sample_id, pred, target, db_file in zip(sample_ids, pred_queries, target_queries, db_paths):
+    # Enumerate tasks to assign a unique order to each one.
+    for order, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
         pool.apply_async(
-            aexecute_model,
-            args=(pred, target, db_file, sample_id, meta_time_out),
-            callback=update
+            execute_model,
+            args=(pred, target, db_file, sample_id, meta_time_out, order),
+            callback=update,
         )
 
     pool.close()
