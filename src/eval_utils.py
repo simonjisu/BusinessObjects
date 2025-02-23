@@ -707,15 +707,14 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
     db_paths = eval_data['db_paths']
     exec_results = [None] * len(sample_ids)
 
-    pbar = tqdm(total=len(sample_ids), desc="Processing execution", position=0)
+    # pbar = tqdm(total=len(sample_ids), desc="Processing execution", position=0)
     # Create a pool that recycles workers after each task to help release memory.
     pool = mp.Pool(processes=num_cpus, maxtasksperchild=1)
 
     def update(result):
         order = result['order']
         exec_results[order] = result
-        pbar.update(1)
-        return update
+        # pbar.update(1)
 
     # Enumerate tasks to assign a unique order to each one.
     for order, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
@@ -727,7 +726,7 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
 
     pool.close()
     pool.join()
-    pbar.close()
+    # pbar.close()
 
     return exec_results
 
