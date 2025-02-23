@@ -2,6 +2,7 @@
 uv run run_bo_sql.py \
     --ds bird \
     --type test \
-    --task search_value \
+    --task aggregate \
     --exp_name pipeline_exp \
-    --prefix "x-test-no_bos-"
+    --eval_target fill_in \
+    --with_bos

@@ -4,4 +4,5 @@ uv run run_bo_sql.py \
     --type test \
     --task search_value \
     --exp_name pipeline_exp \
-    --prefix "x-test-no_bos-"
+    --with_bos \
+    --prefix "x-test-with_bos-"
