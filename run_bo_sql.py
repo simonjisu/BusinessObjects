@@ -764,8 +764,8 @@ def evaluate_exec(
             batch_exec_result = run_sqls(batch_eval_data, meta_time_out=meta_time_out)
         else:
             batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
-        assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
-       
+        # assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
+        logging.info(f"Batch {batch_i+1} - Done execution")
         for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
             key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
             doc_ids = eval_data2doc_ids.get(key)

@@ -601,7 +601,6 @@ def execute_sql(
         res = 0
         target_error = False
 
-    
     return res, target_error
 
 def execute_model(
@@ -661,7 +660,7 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
 
     exec_result = []
     pbar = tqdm(total=len(sample_ids))
-    pool = mp.Pool(processes=num_cpus, maxtasksperchild=1)
+    pool = mp.Pool(processes=num_cpus, maxtasksperchild=2)
 
     def update(result):
         exec_result.append(result)
@@ -677,7 +676,7 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
             ),
             callback=update,
         )
-        
+    
     pool.close()
     pool.join()
     
