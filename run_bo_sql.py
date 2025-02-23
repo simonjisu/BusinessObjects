@@ -1499,9 +1499,22 @@ if __name__ == '__main__':
                 return None
             return ei
         
-        logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+        class TqdmLoggingHandler(logging.Handler):
+            def emit(self, record):
+                try:
+                    msg = self.format(record)
+                    # Use tqdm.write to ensure the progress bar isn't overwritten.
+                    tqdm.write(msg)
+                    self.flush()
+                except Exception:
+                    self.handleError(record)
+
         logger = logging.getLogger()
-        logger.addHandler(TqdmLoggingHandler())
+        logger.setLevel(logging.INFO)
+        handler = TqdmLoggingHandler()
+        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
+        handler.setFormatter(formatter)
+        logger.addHandler(handler)
         
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
 
