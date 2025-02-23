@@ -1578,7 +1578,7 @@ if __name__ == '__main__':
                 eval_data2doc_ids,
                 execution_result_path,
                 num_cpus=args.num_cpus,
-                meta_time_out=5.0
+                meta_time_out=30.0
             )
 
         # semantic and structural evaluation
