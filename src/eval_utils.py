@@ -709,7 +709,7 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
 
     # pbar = tqdm(total=len(sample_ids), desc="Processing execution", position=0)
     # Create a pool that recycles workers after each task to help release memory.
-    pool = mp.Pool(processes=num_cpus, maxtasksperchild=1)
+    pool = mp.Pool(processes=num_cpus, maxtasksperchild=2)
 
     def update(result):
         order = result['order']
