@@ -610,6 +610,12 @@ def execute_model(
     sample_id: int, 
     meta_time_out: float
 ):
+    with open('skip.sql', 'r') as file:
+        skip_sql = file.readlines()
+    if target in skip_sql:
+        result = [(f"skipped",)]
+        res = 0
+        target_error = True
     try:
         # with contextlib.redirect_stderr(io.StringIO()):
         res, target_error = func_timeout(
@@ -636,8 +642,6 @@ def run_sqls(eval_data, meta_time_out=30.0):
     pred_queries = eval_data['pred_queries']
     target_queries = eval_data['target_queries']
     db_paths = eval_data['db_paths']
-    with open('skip.sql', 'r') as file:
-        skip_sql = file.readlines()
     exec_result = [None] * len(sample_ids)
 
     samples_by_db = defaultdict(list)
@@ -649,8 +653,6 @@ def run_sqls(eval_data, meta_time_out=30.0):
         for i, sample_id, pred, target in tqdm(
             samples, total=len(samples), desc=f"Processing {Path(db_file).stem}"
         ):
-            if target in skip_sql:
-                continue
             result = execute_model(pred, target, db_file, sample_id, meta_time_out)
             exec_result[i] = result
         
