@@ -763,22 +763,42 @@ def evaluate_exec(
 
         if num_cpus == 1:
             batch_exec_result = run_sqls(batch_eval_data, meta_time_out=meta_time_out)
+            # assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
+            logging.info(f"Batch {batch_i+1} - Done execution")
+            for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
+                key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
+                doc_ids = eval_data2doc_ids.get(key)
+                result = batch_exec_result[j]
+                if doc_ids:
+                    for doc_id in doc_ids:
+                        new_res = deepcopy(result)
+                        new_res['doc_ids'] = [doc_id]
+                        batch_results.append(new_res)
+                else:
+                    result['doc_ids'] = []
+                    batch_results.append(result)
         else:
             batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
-        # assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
-        logging.info(f"Batch {batch_i+1} - Done execution")
-        for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
-            key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
-            doc_ids = eval_data2doc_ids.get(key)
-            result = batch_exec_result[j]
-            if doc_ids:
-                for doc_id in doc_ids:
-                    new_res = deepcopy(result)
-                    new_res['doc_ids'] = [doc_id]
-                    batch_results.append(new_res)
-            else:
-                result['doc_ids'] = []
-                batch_results.append(result)
+            # Build a mapping from the unique order to result.
+            result_by_order = {res["order"]: res for res in batch_exec_result}
+            # Iterate over tasks using enumerate (order will be the index within the batch)
+            for order, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
+                key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
+                doc_ids = eval_data2doc_ids.get(key)
+                result = result_by_order.get(order)
+                if result is None:
+                    logging.error(f"Missing result for order {order} (sample_id: {sample_id})")
+                    continue
+                if doc_ids:
+                    for doc_id in doc_ids:
+                        new_res = deepcopy(result)
+                        new_res['doc_ids'] = [doc_id]
+                        batch_results.append(new_res)
+                else:
+                    result['doc_ids'] = []
+                    batch_results.append(result)
+
+
 
         with open(eval_path / f'temp_exec-{batch_i}.json', 'w') as f:
             json.dump(batch_results, f, indent=4)
