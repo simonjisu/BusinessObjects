@@ -2,6 +2,7 @@ import warnings
 import sqlglot
 from sqlglot import expressions as exp
 
+import os
 import sys
 import gc
 import numpy as np
@@ -614,6 +615,8 @@ def execute_model(
     sample_id: int, 
     meta_time_out: float
 ):
+    pid = os.getpid()
+    logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id}")
     try:
         # with contextlib.redirect_stderr(io.StringIO()):
         res, target_error = func_timeout(
@@ -622,16 +625,17 @@ def execute_model(
             args=(pred, target, db_file),
         )
     except KeyboardInterrupt:
+        logging.info(f"Worker {pid}: Received KeyboardInterrupt. Exiting.")
         sys.exit(0)
     except FunctionTimedOut:
-        result = [(f"timeout",)]
-        res = 0
-        target_error = False
+        logging.warning(f"Worker {pid}: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
+        res, target_error = 0, False
         gc.collect()
     except Exception as e:
-        result = [(f"error",)]  # possibly len(query) > 512 or not executable
-        res = 0
-        target_error = False
+        logging.error(f"Worker {pid}: Exception in execute_model for sample_id {sample_id}: {e}")
+        res, target_error = 0, False
+    finally:
+        logging.info(f"Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
     
     result = {"sample_id": sample_id, "res": res, "target_error": target_error}
     return result
