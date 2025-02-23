@@ -680,17 +680,17 @@ def aexecute_model(
             args=(pred, target, db_file)
         )
     except KeyboardInterrupt:
-        logging.info(f"Worker {pid}: Received KeyboardInterrupt. Exiting.")
+        logging.info(f"[{order}] Worker {pid}: Received KeyboardInterrupt. Exiting.")
         sys.exit(0)
     except FunctionTimedOut:
-        logging.warning(f"Worker {pid}: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
+        logging.warning(f"[{order}] Worker {pid}: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
         res, target_error = 0, False
         gc.collect()
     except Exception as e:
-        logging.error(f"Worker {pid}: Exception in execute_model for sample_id {sample_id}: {e}")
+        logging.error(f"[{order}] Worker {pid}: Exception in execute_model for sample_id {sample_id}: {e}")
         res, target_error = 0, False
     finally:
-        logging.info(f"Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
+        logging.info(f"[{order}] Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
     
     # Include the order in the returned result
     return {"order": order, "sample_id": sample_id, "res": res, "target_error": target_error}
@@ -713,7 +713,11 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
 
     def update(result):
         order = result['order']
-        exec_results[order] = result
+        exec_results[order] = {
+            'sample_id': result['sample_id'],
+            'res': result['res'],
+            'target_error': result['target_error'],
+        }
         # pbar.update(1)
 
     # Enumerate tasks to assign a unique order to each one.
