@@ -580,18 +580,19 @@ def check_if_exists_orderby(sql):
 def execute_sql(
     pred: str, 
     target: str, 
-    db_file: str, 
+    db_file: str,
+    max_rows: int = 10000 
 ):
     db = SqliteDatabase(db_file=db_file)
     try:
-        # target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
-        target_res = db.execute(target, rt_pandas=False)
+        target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
+        target_res = db.execute(target_sql, rt_pandas=False)
         target_error = False
     except OperationalError as e:
         target_error = True
     try:
-        # pred_sql = f'SELECT * FROM ({pred}) LIMIT {max_rows};'  # avoid to load too many rows
-        pred_res = db.execute(pred, rt_pandas=False)
+        pred_sql = f'SELECT * FROM ({pred}) LIMIT {max_rows};'  # avoid to load too many rows
+        pred_res = db.execute(pred_sql, rt_pandas=False)
         exists_orderby = check_if_exists_orderby(target)
         res = int(result_eq(pred_res, target_res, order_matters=exists_orderby))
     except KeyboardInterrupt:
@@ -644,11 +645,10 @@ def run_sqls(eval_data, meta_time_out=30.0):
         samples_by_db[db_file].append((i, sample_id, pred, target))
 
     for db_file, samples in samples_by_db.items():
-        db = SqliteDatabase(db_file=db_file)
         for i, sample_id, pred, target in tqdm(
             samples, total=len(samples), desc=f"Processing {Path(db_file).stem}"
         ):
-            result = execute_model(pred, target, db, sample_id, meta_time_out)
+            result = execute_model(pred, target, db_file, sample_id, meta_time_out)
             exec_result[i] = result
         
     return exec_result
