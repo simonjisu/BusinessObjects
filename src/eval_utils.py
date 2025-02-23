@@ -669,9 +669,9 @@ def worker_execute_sql(q: mp.Queue, pred: str, target: str, db_file: str):
         logging.error(f"Worker {os.getpid()}: Exception in worker_execute_sql: {e}")
         q.put((0, False))
 
-def aexecute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float, order: int):
+def aexecute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float):
     pid = os.getpid()
-    logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id} (order {order})")
+    logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id})")
     try:
         res, target_error = func_timeout(
             meta_time_out,
@@ -682,17 +682,17 @@ def aexecute_model(pred: str, target: str, db_file: str, sample_id: int, meta_ti
         logging.info(f"Worker {pid}: Received KeyboardInterrupt. Exiting.")
         sys.exit(0)
     except FunctionTimedOut:
-        logging.warning(f"Worker {pid}: FunctionTimedOut for sample_id {sample_id} (order {order}) after {meta_time_out} seconds.")
+        logging.warning(f"Worker {pid}: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
         res, target_error = 0, False
         gc.collect()
     except Exception as e:
-        logging.error(f"Worker {pid}: Exception in execute_model for sample_id {sample_id} (order {order}): {e}")
+        logging.error(f"Worker {pid}: Exception in execute_model for sample_id {sample_id}: {e}")
         res, target_error = 0, False
     finally:
-        logging.info(f"Worker {pid}: Finished execute_model for sample_id {sample_id} (order {order}) with res={res}, target_error={target_error}")
+        logging.info(f"Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
     
     # Include the order in the returned result
-    return {"order": order, "sample_id": sample_id, "res": res, "target_error": target_error}
+    return {"sample_id": sample_id, "res": res, "target_error": target_error}
 
 
 def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
@@ -704,22 +704,24 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
     pred_queries = eval_data['pred_queries']
     target_queries = eval_data['target_queries']
     db_paths = eval_data['db_paths']
+    exec_results = [None] * len(sample_ids)
 
-    exec_results = []
     pbar = tqdm(total=len(sample_ids), desc="Processing execution", position=0)
     # Create a pool that recycles workers after each task to help release memory.
     pool = mp.Pool(processes=num_cpus, maxtasksperchild=1)
 
-    def update(result):
-        exec_results.append(result)
-        pbar.update(1)
+    def make_update(order):
+        def update(result):
+            exec_results[order] = result
+            pbar.update(1)
+        return update
 
     # Enumerate tasks to assign a unique order to each one.
     for order, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
         pool.apply_async(
-            execute_model,
-            args=(pred, target, db_file, sample_id, meta_time_out, order),
-            callback=update,
+            aexecute_model,
+            args=(pred, target, db_file, sample_id, meta_time_out),
+            callback=make_update,
         )
 
     pool.close()
