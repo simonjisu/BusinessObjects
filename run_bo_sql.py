@@ -1500,7 +1500,8 @@ if __name__ == '__main__':
             return ei
         
         logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
-        logging.addHandler(TqdmLoggingHandler())
+        logger = logging.getLogger()
+        logger.addHandler(TqdmLoggingHandler())
         
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
 
