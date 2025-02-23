@@ -42,10 +42,9 @@ from src.pymodels import (
     BODescription,
     DirectSQLResponse
 )
-from src.db_utils import get_schema_str
+from src.db_utils import get_schema_str, get_db_file
 from src.data_preprocess import process_all_tables, load_raw_data, load_samples_spider_bird
 from src.database import SqliteDatabase
-from src.db_utils import get_db_file
 from src.parsing_sql import (
     Schema, extract_all, extract_aliases, _format_expression, STRING_TYPE, NUMERIC_TYPE
 )
@@ -54,7 +53,8 @@ from src.eval_utils import (
     run_sqls_parallel,
     get_all_structural_score,
     get_all_semantic_score,
-    run_sqls
+    run_sqls,
+    TqdmLoggingHandler
 )
 
 _ = load_dotenv(find_dotenv())
@@ -763,40 +763,23 @@ def evaluate_exec(
 
         if num_cpus == 1:
             batch_exec_result = run_sqls(batch_eval_data, meta_time_out=meta_time_out)
-            # assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
-            logging.info(f"Batch {batch_i+1} - Done execution")
-            for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
-                key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
-                doc_ids = eval_data2doc_ids.get(key)
-                result = batch_exec_result[j]
-                if doc_ids:
-                    for doc_id in doc_ids:
-                        new_res = deepcopy(result)
-                        new_res['doc_ids'] = [doc_id]
-                        batch_results.append(new_res)
-                else:
-                    result['doc_ids'] = []
-                    batch_results.append(result)
         else:
             batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
-            # Build a mapping from the unique order to result.
-            result_by_order = {res["order"]: res for res in batch_exec_result}
-            # Iterate over tasks using enumerate (order will be the index within the batch)
-            for order, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
-                key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
-                doc_ids = eval_data2doc_ids.get(key)
-                result = result_by_order.get(order)
-                if result is None:
-                    logging.error(f"Missing result for order {order} (sample_id: {sample_id})")
-                    continue
-                if doc_ids:
-                    for doc_id in doc_ids:
-                        new_res = deepcopy(result)
-                        new_res['doc_ids'] = [doc_id]
-                        batch_results.append(new_res)
-                else:
-                    result['doc_ids'] = []
-                    batch_results.append(result)
+        
+        # assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
+        logging.info(f"Batch {batch_i+1} - Done execution")
+        for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
+            key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
+            doc_ids = eval_data2doc_ids.get(key)
+            result = batch_exec_result[j]
+            if doc_ids:
+                for doc_id in doc_ids:
+                    new_res = deepcopy(result)
+                    new_res['doc_ids'] = [doc_id]
+                    batch_results.append(new_res)
+            else:
+                result['doc_ids'] = []
+                batch_results.append(result)
 
 
 
@@ -1507,6 +1490,7 @@ if __name__ == '__main__':
         )
         
     elif args.task == 'evaluate':
+        
         def parse_sql_to_output(sql: str, schema: Schema):
             try:
                 ei = extract_all(sql, schema)
@@ -1516,6 +1500,8 @@ if __name__ == '__main__':
             return ei
         
         logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
+        logging.addHandler(TqdmLoggingHandler())
+        
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
 
         file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
