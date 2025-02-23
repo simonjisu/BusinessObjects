@@ -636,7 +636,8 @@ def run_sqls(eval_data, meta_time_out=30.0):
     pred_queries = eval_data['pred_queries']
     target_queries = eval_data['target_queries']
     db_paths = eval_data['db_paths']
-
+    with open('skip.sql', 'r') as file:
+        skip_sql = file.readlines()
     exec_result = [None] * len(sample_ids)
 
     samples_by_db = defaultdict(list)
@@ -644,9 +645,12 @@ def run_sqls(eval_data, meta_time_out=30.0):
         samples_by_db[db_file].append((i, sample_id, pred, target))
 
     for db_file, samples in samples_by_db.items():
+        
         for i, sample_id, pred, target in tqdm(
             samples, total=len(samples), desc=f"Processing {Path(db_file).stem}"
         ):
+            if target in skip_sql:
+                continue
             result = execute_model(pred, target, db_file, sample_id, meta_time_out)
             exec_result[i] = result
         
@@ -660,7 +664,7 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
 
     exec_result = []
     pbar = tqdm(total=len(sample_ids))
-    pool = mp.Pool(processes=num_cpus, maxtasksperchild=2)
+    pool = mp.Pool(processes=num_cpus, maxtasksperchild=3)
 
     def update(result):
         exec_result.append(result)

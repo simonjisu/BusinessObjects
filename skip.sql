@@ -1,0 +1,2 @@
+SELECT COUNT(T2.user_id) FROM movies AS T1 INNER JOIN ratings AS T2 ON T1.movie_id = T2.movie_id WHERE T1.movie_release_year = 1924 AND T1.director_name = 'Erich von Stroheim' AND T2.rating_score = 5 AND T2.user_has_payment_method = 1
+SELECT T2.user_avatar_image_url FROM ratings AS T1 INNER JOIN lists_users AS T2 ON T1.user_id = T2.user_id WHERE T1.rating_score = 5
