@@ -660,22 +660,27 @@ class SqliteDatabase(Database):
             if rt_pandas:
                 output = pd.read_sql_query(query, conn)
             else:
-                with conn.cursor() as c:
-                    output = c.execute(query).fetchall()
+                cursor = conn.cursor()
+                try:
+                    output = cursor.execute(query).fetchall()
+                except Exception as e:
+                    output = e
+                cursor.close()
         return output
     
     def create_index(self):
         conn = sqlite3.connect(self.db_file)
         
         with conn:
-            with conn.cursor() as c:
-                for table_name, columns in self.table_cols.items():
-                    if table_name == 'sqlite_sequence':
-                        continue
-                    for column in columns:
-                        c.execute(f"""
-                        CREATE INDEX IF NOT EXISTS 'idx_{table_name}_{column}' ON '{table_name}'('{column}');
-                        """)
+            cursor = conn.cursor()
+            for table_name, columns in self.table_cols.items():
+                if table_name == 'sqlite_sequence':
+                    continue
+                for column in columns:
+                    cursor.execute(f"""
+                    CREATE INDEX IF NOT EXISTS 'idx_{table_name}_{column}' ON '{table_name}'('{column}');
+                    """)
+            cursor.close()
             conn.commit()
         
 class DuckDBDatabase(Database):
