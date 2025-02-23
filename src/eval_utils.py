@@ -580,9 +580,9 @@ def check_if_exists_orderby(sql):
 def execute_sql(
     pred: str, 
     target: str, 
-    db: SqliteDatabase # db_file: str, 
+    db_file: str, 
 ):
-    # db = SqliteDatabase(db_file=db_file)
+    db = SqliteDatabase(db_file=db_file)
     try:
         # target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
         target_res = db.execute(target, rt_pandas=False)
@@ -604,17 +604,17 @@ def execute_sql(
 def execute_model(
     pred: str, 
     target: str, 
-    db: SqliteDatabase, # db_file: str, 
+    db_file: str, 
     sample_id: int, 
     meta_time_out: float
 ):
     try:
-        with contextlib.redirect_stderr(io.StringIO()):
-            res, target_error = func_timeout(
-                meta_time_out,
-                execute_sql,
-                args=(pred, target, db),# db_file),
-            )
+        # with contextlib.redirect_stderr(io.StringIO()):
+        res, target_error = func_timeout(
+            meta_time_out,
+            execute_sql,
+            args=(pred, target, db_file),
+        )
     except KeyboardInterrupt:
         sys.exit(0)
     except FunctionTimedOut:
