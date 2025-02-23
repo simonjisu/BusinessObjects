@@ -53,7 +53,8 @@ from src.eval_utils import (
     get_complexity, 
     run_sqls_parallel,
     get_all_structural_score,
-    get_all_semantic_score
+    get_all_semantic_score,
+    run_sqls
 )
 
 _ = load_dotenv(find_dotenv())
@@ -640,7 +641,6 @@ def task_search_value(
             all_results.extend(temp)
         json.dump(all_results, file, indent=4)
         
-
 def task_fill_in(
         input_samples: list[dict[str, str|int]],
         template_values_sample_id2doc_ids: dict[tuple[str, int], set[int]],
@@ -749,18 +749,21 @@ def evaluate_exec(
         meta_time_out: float = 30.0
     ): 
     eval_path = eval_file.parent
-    n_batch = 2000
+    n_batch = 1000
     n_samples = len(eval_data['sample_ids'])
     batches = list(batched(range(n_samples), n_batch))
     for batch_i, idxes in enumerate(batches):
         logging.info(f"Processing execution - batch {batch_i+1}/{len(batches)}")
-        if (eval_path / f'temp-{batch_i}.json').exists():
+        if (eval_path / f'temp_exec-{batch_i}.json').exists():
             continue
         batch_results = []
         batch_eval_data = {k: [v[i] for i in idxes] for k, v in eval_data.items()}
         batch_preds = [x for x in batch_eval_data['pred_queries']]
         batch_sample_ids = [x for x in batch_eval_data['sample_ids']]
-        batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
+        if num_cpus == 1:
+            batch_exec_result = run_sqls(batch_eval_data, meta_time_out=meta_time_out)
+        else:
+            batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
         assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
        
         for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
@@ -776,7 +779,7 @@ def evaluate_exec(
                 result['doc_ids'] = []
                 batch_results.append(result)
 
-        with open(eval_path / f'temp-{batch_i}.json', 'w') as f:
+        with open(eval_path / f'temp_exec-{batch_i}.json', 'w') as f:
             json.dump(batch_results, f, indent=4)
 
         # free memory
@@ -828,7 +831,7 @@ def evaluate_merit(
     batches = list(batched(range(n_samples), n_batch))
     for batch_i, idxes in enumerate(batches):
         logging.info(f"Processing merit - batch {batch_i+1}/{len(batches)}")
-        if (eval_path / f'temp-{batch_i}.json').exists():
+        if (eval_path / f'temp_merit-{batch_i}.json').exists():
             continue
         batch_keys = []
         batch_target_parsed = []
@@ -876,7 +879,7 @@ def evaluate_merit(
                     'doc_ids': []
                 })
 
-        with open(eval_path / f'temp-{batch_i}.json', 'w') as f:
+        with open(eval_path / f'temp_merit-{batch_i}.json', 'w') as f:
             json.dump(results, f, indent=4)
 
     final_results = []

@@ -654,39 +654,30 @@ class SqliteDatabase(Database):
                         primary_keys.append(column_name)
         return primary_keys
 
-    def start(self):
-        self.con = sqlite3.connect(self.db_file)
-
-    def close(self):
-        self.con.close()
-
     def execute(self, query: str, rt_pandas: bool = True):
-        self.start()
-        
-        if rt_pandas:
-            output = pd.read_sql_query(query, self.con)
-        
-        else:
-            c = self.con.cursor()
-            output = c.execute(query).fetchall()
-            c.close()
-
-        self.close()
+        conn = sqlite3.connect(self.db_file)
+        with conn:
+            if rt_pandas:
+                output = pd.read_sql_query(query, conn)
+            else:
+                with conn.cursor() as c:
+                    output = c.execute(query).fetchall()
         return output
     
     def create_index(self):
-        self.start()
-        c = self.con.cursor()
-        for table_name, columns in self.table_cols.items():
-            if table_name == 'sqlite_sequence':
-                continue
-            for column in columns:
-                c.execute(f"""
-                CREATE INDEX IF NOT EXISTS 'idx_{table_name}_{column}' ON '{table_name}'('{column}');
-                """)
-        self.con.commit()
-        c.close()
-
+        conn = sqlite3.connect(self.db_file)
+        
+        with conn:
+            with conn.cursor() as c:
+                for table_name, columns in self.table_cols.items():
+                    if table_name == 'sqlite_sequence':
+                        continue
+                    for column in columns:
+                        c.execute(f"""
+                        CREATE INDEX IF NOT EXISTS 'idx_{table_name}_{column}' ON '{table_name}'('{column}');
+                        """)
+            conn.commit()
+        
 class DuckDBDatabase(Database):
     def __init__(self, db_file: str|Path):
         super().__init__(db_file)

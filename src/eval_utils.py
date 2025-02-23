@@ -7,6 +7,7 @@ import io
 import numpy as np
 import random
 import gc
+import time
 from tqdm import tqdm
 from pathlib import Path
 from collections import defaultdict
@@ -579,9 +580,12 @@ def check_if_exists_orderby(sql):
 
 
 def execute_sql(
-    pred: str, target: str, db_file: str, max_rows=10000
+    pred: str, 
+    target: str, 
+    db: SqliteDatabase, # db_file: str, 
+    max_rows=10000
 ):
-    db = SqliteDatabase(db_file=db_file)
+    # db = SqliteDatabase(db_file=db_file)
     try:
         target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
         target_res = db.execute(target_sql, rt_pandas=False)
@@ -601,14 +605,18 @@ def execute_sql(
     return res, target_error
 
 def execute_model(
-    pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float
+    pred: str, 
+    target: str, 
+    db: SqliteDatabase, # db_file: str, 
+    sample_id: int, 
+    meta_time_out: float
 ):
     try:
         with contextlib.redirect_stderr(io.StringIO()):
             res, target_error = func_timeout(
                 meta_time_out,
                 execute_sql,
-                args=(pred, target, db_file),
+                args=(pred, target, db),# db_file),
             )
     except KeyboardInterrupt:
         sys.exit(0)
@@ -623,6 +631,31 @@ def execute_model(
     
     result = {"sample_id": sample_id, "res": res, "target_error": target_error}
     return result
+
+def run_sqls(eval_data, meta_time_out=30.0):
+    sample_ids = eval_data['sample_ids']
+    pred_queries = eval_data['pred_queries']
+    target_queries = eval_data['target_queries']
+    db_paths = eval_data['db_paths']
+
+    exec_result = [None] * len(sample_ids)
+
+    samples_by_db = defaultdict(list)
+    for i, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
+        samples_by_db[db_file].append((i, sample_id, pred, target))
+
+    for db_file, samples in samples_by_db.items():
+        db = SqliteDatabase(db_file=db_file)
+        for i, sample_id, pred, target in tqdm(
+            samples, total=len(samples), desc=f"Processing {Path(db_file).stem}"
+        ):
+            result = execute_model(pred, target, db, sample_id, meta_time_out)
+            exec_result[i] = result
+        del db
+        gc.collect()
+        time.sleep(1)
+        
+    return exec_result
 
 def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
     sample_ids = eval_data['sample_ids']
