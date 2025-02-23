@@ -770,10 +770,10 @@ def evaluate_exec(
             key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
             doc_ids = eval_data2doc_ids.get(key)
             result = batch_exec_result[j]
-            if result is None:
-                # skipped db
-                result = {'sample_id': sample_id, 'res': None, 'target_error': True}
             if doc_ids:
+                # if result is None:
+                #     # skipped db_ids
+                #     result = {'sample_id': sample_id, 'res': None, 'target_error': None}
                 for doc_id in doc_ids:
                     new_res = deepcopy(result)
                     new_res['doc_ids'] = [doc_id]
@@ -781,8 +781,6 @@ def evaluate_exec(
             else:
                 result['doc_ids'] = []
                 batch_results.append(result)
-
-
 
         with open(eval_path / f'temp_exec-{batch_i}.json', 'w') as f:
             json.dump(batch_results, f, indent=4)

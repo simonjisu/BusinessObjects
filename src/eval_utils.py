@@ -669,7 +669,8 @@ def worker_execute_sql(q: mp.Queue, pred: str, target: str, db_file: str):
         logging.error(f"Worker {os.getpid()}: Exception in worker_execute_sql: {e}")
         q.put((0, False))
 
-def aexecute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float):
+def aexecute_model(
+        pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float, order: int):
     pid = os.getpid()
     # logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id})")
     try:
@@ -692,7 +693,7 @@ def aexecute_model(pred: str, target: str, db_file: str, sample_id: int, meta_ti
         logging.info(f"Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
     
     # Include the order in the returned result
-    return {"sample_id": sample_id, "res": res, "target_error": target_error}
+    return {"order": order, "sample_id": sample_id, "res": res, "target_error": target_error}
 
 
 def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
@@ -710,18 +711,18 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
     # Create a pool that recycles workers after each task to help release memory.
     pool = mp.Pool(processes=num_cpus, maxtasksperchild=1)
 
-    def make_update(order):
-        def update(result):
-            exec_results[order] = result
-            pbar.update(1)
+    def update(result):
+        order = result['order']
+        exec_results[order] = result
+        pbar.update(1)
         return update
 
     # Enumerate tasks to assign a unique order to each one.
     for order, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
         pool.apply_async(
             aexecute_model,
-            args=(pred, target, db_file, sample_id, meta_time_out),
-            callback=make_update,
+            args=(pred, target, db_file, sample_id, meta_time_out, order),
+            callback=update,
         )
 
     pool.close()
