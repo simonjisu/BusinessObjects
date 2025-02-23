@@ -610,12 +610,6 @@ def execute_model(
     sample_id: int, 
     meta_time_out: float
 ):
-    with open('skip.sql', 'r') as file:
-        skip_sql = file.readlines()
-    if target in skip_sql:
-        result = [(f"skipped",)]
-        res = 0
-        target_error = True
     try:
         # with contextlib.redirect_stderr(io.StringIO()):
         res, target_error = func_timeout(
@@ -666,7 +660,7 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
 
     exec_result = []
     pbar = tqdm(total=len(sample_ids))
-    pool = mp.Pool(processes=num_cpus, maxtasksperchild=3)
+    pool = mp.Pool(processes=num_cpus, maxtasksperchild=1)
 
     def update(result):
         exec_result.append(result)
