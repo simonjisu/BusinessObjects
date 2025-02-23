@@ -651,9 +651,6 @@ def run_sqls(eval_data, meta_time_out=30.0):
         ):
             result = execute_model(pred, target, db, sample_id, meta_time_out)
             exec_result[i] = result
-        del db
-        gc.collect()
-        time.sleep(1)
         
     return exec_result
 

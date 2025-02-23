@@ -749,7 +749,7 @@ def evaluate_exec(
         meta_time_out: float = 30.0
     ): 
     eval_path = eval_file.parent
-    n_batch = 1000
+    n_batch = 2000
     n_samples = len(eval_data['sample_ids'])
     batches = list(batched(range(n_samples), n_batch))
     for batch_i, idxes in enumerate(batches):
@@ -781,10 +781,6 @@ def evaluate_exec(
 
         with open(eval_path / f'temp_exec-{batch_i}.json', 'w') as f:
             json.dump(batch_results, f, indent=4)
-
-        # free memory
-        del batch_eval_data, batch_results, batch_exec_result, batch_sample_ids, batch_preds
-        gc.collect()
 
     final_results = []
     for i in range(len(batches)):
