@@ -32,22 +32,6 @@ import logging
 from bert_score import score as bscore
 from src.database import SqliteDatabase
 
-class TqdmLoggingHandler(logging.StreamHandler):
-    """Avoid tqdm progress bar interruption by logger's output to console"""
-    # see logging.StreamHandler.eval method:
-    # https://github.com/python/cpython/blob/d2e2534751fd675c4d5d3adc208bf4fc984da7bf/Lib/logging/__init__.py#L1082-L1091
-    # and tqdm.write method:
-    # https://github.com/tqdm/tqdm/blob/f86104a1f30c38e6f80bfd8fb16d5fcde1e7749f/tqdm/std.py#L614-L620
-
-    def emit(self, record):
-        try:
-            msg = self.format(record)
-            tqdm.write(msg, end=self.terminator)
-        except RecursionError:
-            raise
-        except Exception:
-            self.handleError(record)
-
 def partial_match(gold_set: set, predict_set: set):
     intersection = gold_set.intersection(predict_set)
     union = gold_set.union(predict_set)
@@ -687,7 +671,7 @@ def worker_execute_sql(q: mp.Queue, pred: str, target: str, db_file: str):
 
 def aexecute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float):
     pid = os.getpid()
-    logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id})")
+    # logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id})")
     try:
         res, target_error = func_timeout(
             meta_time_out,

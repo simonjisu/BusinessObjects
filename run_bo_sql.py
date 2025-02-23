@@ -10,7 +10,6 @@ from collections import defaultdict
 from itertools import product
 import logging
 import hashlib
-import gc
 
 from copy import deepcopy
 from dotenv import load_dotenv, find_dotenv
@@ -54,7 +53,6 @@ from src.eval_utils import (
     get_all_structural_score,
     get_all_semantic_score,
     run_sqls,
-    TqdmLoggingHandler
 )
 
 _ = load_dotenv(find_dotenv())
@@ -772,6 +770,9 @@ def evaluate_exec(
             key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
             doc_ids = eval_data2doc_ids.get(key)
             result = batch_exec_result[j]
+            if result is None:
+                # skipped db
+                result = {'sample_id': sample_id, 'res': None, 'target_error': True}
             if doc_ids:
                 for doc_id in doc_ids:
                     new_res = deepcopy(result)
@@ -1499,23 +1500,7 @@ if __name__ == '__main__':
                 return None
             return ei
         
-        class TqdmLoggingHandler(logging.Handler):
-            def emit(self, record):
-                try:
-                    msg = self.format(record)
-                    # Use tqdm.write to ensure the progress bar isn't overwritten.
-                    tqdm.write(msg)
-                    self.flush()
-                except Exception:
-                    self.handleError(record)
-
-        logger = logging.getLogger()
-        logger.setLevel(logging.INFO)
-        handler = TqdmLoggingHandler()
-        formatter = logging.Formatter("%(asctime)s [%(levelname)s] %(message)s")
-        handler.setFormatter(formatter)
-        logger.addHandler(handler)
-        
+        logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
 
         file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
