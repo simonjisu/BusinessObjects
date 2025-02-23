@@ -346,40 +346,6 @@ class BADataset():
                     same_db_sampled.add(sd_qid)
                     i += 1
 
-            # positive from different db, same code: ds
-            # iterator.set_postfix_str(f'[{self.task}-{qid}] sampling pos sample from different database')
-            # i = 0
-            
-            # ds_sampled_db_ids = set()  # {db_id} only added if there is no samples that have the same code in different db
-            # while i < n_pos_ds:
-            #     # if there is no more samples to be sampled, raise error
-            #     if len(diff_db_sampled) == len(self.sample_ids):
-            #         raise ValueError(f'No more samples to be sampled that match criteria, please decrease `n_neg` or lower the `threshold`')
-                
-            #     db_ids_candidates = np.setdiff1d(list(self.db_id2qids.keys()), [db_id]+list(ds_sampled_db_ids))
-            #     ds_sampled_db_id = np.random.choice(db_ids_candidates)
-            #     # check existance of target code in the sampled db
-            #     if target_code not in self.codes2qids[ds_sampled_db_id].keys():
-            #         ds_sampled_db_ids.add(ds_sampled_db_id)
-            #         continue
-
-            #     # check enough qids to sample for target code
-            #     ds_qid_candidates = np.setdiff1d(self.codes2qids[ds_sampled_db_id][target_code], list(diff_db_sampled))
-            #     if len(ds_qid_candidates) == 0:
-            #         # there is no samples that have the same code in different db, check other dbs
-            #         ds_sampled_db_ids.add(ds_sampled_db_id)
-            #         continue
-
-            #     ds_qid = np.random.choice(ds_qid_candidates)
-            #     ds_sid = self.sample_ids[ds_qid]
-
-            #     # check if sampled_qid not in sampled
-            #     if ds_qid not in diff_db_sampled:
-            #         s['text'].append([ds_qid, ds_sid])
-            #         s['label'].append(1)
-            #         diff_db_sampled.add(ds_qid)
-            #         i += 1
-            
             # negative from different db, different code
             iterator.set_postfix_str(f'[{self.task}-{qid}] sampling neg sample from different database')
             i = 0
@@ -495,7 +461,6 @@ class BADataset():
                 })
         return samples
     
-
 def run_parallel(func, args, num_cpus: int=1):
     pool = mp.Pool(processes=num_cpus)
     results = pool.starmap(func, args)
@@ -507,41 +472,6 @@ def extract_first_number_from_index(x: pd.Index|pd.CategoricalIndex):
     x = x.tolist()
     x = list(map(lambda y: float(y.lstrip('(').split(',')[0]), x))
     return x
-
-# def get_hard_negative_samples(df: pd.DataFrame, n_neg_each_db: int=1):
-#     """
-#     samples: dict[str, dict[int|str, str]] = {
-#         'question': {sample_id: question, ...},
-#         'ba': {sample_id: ba, ...},
-#         'gold_complexity_codes': {sample_id: gold_complexity_codes, ...}
-#     }
-
-#     sample_ids for reranker:
-
-#     sample_ids: dict[db_id] = {
-#         'pos': [pos1, pos2, ...],
-#         'neg_per_code': {
-#             0: [neg1, neg2, ...],
-#             1: [neg1, neg2, ...],
-#             2: [neg1, neg2, ...],
-#             3: [neg1, neg2, ...],
-#             4: [neg1, neg2, ...],
-#         }
-#     }
-#     """
-#     db_ids = df['db_id'].unique()
-#     samples = df.loc[:, ['sample_id', 'question', 'ba', 'gold_complexity_codes']].set_index('sample_id').to_dict('dict')  # question, ba key -- {sample_id: value}
-#     sample_ids = {}
-#     # positive sample 
-#     # for each complexity code, sample 1 negative from each db (then we have 4*len(db) negatives)
-#     for db_id in tqdm(db_ids, total=len(db_ids)):
-#         positive_samples = df.loc[df['db_id'] == db_id, 'sample_id'].tolist()
-#         negative_samples = df.loc[df['db_id'] != db_id, ['sample_id', 'db_id', 'gold_complexity_codes']]\
-#             .groupby(['gold_complexity_codes', 'db_id']).sample(n=n_neg_each_db)
-#         negative_samples = negative_samples.groupby(['gold_complexity_codes'])['sample_id'].apply(list).to_dict()
-#         sample_ids[db_id] = {'pos': positive_samples, 'neg_per_code': negative_samples}
-
-#     return {'samples': samples, 'sample_ids': sample_ids}
 
 def split_train_dev_retrieval_data(
         train_bo_path: Path|str, frac: float=0.9, n_qcut: int =5, 
@@ -584,11 +514,6 @@ def split_train_dev_retrieval_data(
     df_train = df.groupby('gold_complexity_codes').sample(frac=frac, random_state=random_state)
     df_dev = df.drop(df_train.index)
 
-    # print('Processing train data')
-    # train_data = get_hard_negative_samples(df_train, n_neg_each_db)
-    # print('Processing dev data')
-    # dev_data = get_hard_negative_samples(df_dev, n_neg_each_db)
-    # train_data, dev_data = run_parallel(get_hard_negative_samples, [(df_train, n_neg_each_db), (df_dev, n_neg_each_db)], num_cpus=num_cpus)
     train_data = df_train.loc[:, ['sample_id', 'db_id', 'question', 'ba', 'gold_complexity_codes']].set_index('sample_id').to_dict('dict')
     dev_data = df_dev.loc[:, ['sample_id', 'db_id', 'question', 'ba', 'gold_complexity_codes']].set_index('sample_id').to_dict('dict')
     return {
@@ -597,7 +522,8 @@ def split_train_dev_retrieval_data(
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Train retrieval model')
-    parser.add_argument('--task', type=str, default='retrieval', help='`retrieval`, `data_prep`')
+    parser.add_argument('--task', type=str, default='retrieval', 
+                        help='`retrieval`, `data_prep`')
     parser.add_argument('--ds', type=str, default='bird', help='Dataset to use for training. spider or bird') 
     parser.add_argument('--num_cpus', type=int, default=1, help='Number of cpus to use for parallel processing')
     parser.add_argument('--num_train_epochs', type=int, default=3, help='Number of training epochs')

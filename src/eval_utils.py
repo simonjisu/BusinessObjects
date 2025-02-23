@@ -32,6 +32,8 @@ import logging
 from bert_score import score as bscore
 from src.database import SqliteDatabase
 
+SKIP_DB_IDS = ['movie_platform']
+
 def partial_match(gold_set: set, predict_set: set):
     intersection = gold_set.intersection(predict_set)
     union = gold_set.union(predict_set)
@@ -583,9 +585,8 @@ def execute_sql(
     db_file: str,
     max_rows: int = 10000 
 ):
-    skip_db_ids = ['movie_platform']
     db_id = Path(db_file).stem
-    if db_id in skip_db_ids:
+    if db_id in SKIP_DB_IDS:
         return 0, False
     db = SqliteDatabase(db_file=db_file)
     try:

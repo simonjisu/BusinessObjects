@@ -53,6 +53,7 @@ from src.eval_utils import (
     get_all_structural_score,
     get_all_semantic_score,
     run_sqls,
+    SKIP_DB_IDS
 )
 
 _ = load_dotenv(find_dotenv())
@@ -349,10 +350,15 @@ def task_gen_template(
     n_batch = 32 if is_test else 2 # batch size
     n_batch = n_batch if with_bos else 32
     def create_hint(id2bo, doc_ids):
-        docs = [{
-            'descrption': id2bo[doc_id]['ba'], 
-            'virtual_table': id2bo[doc_id]['vt']
-        } for doc_id in doc_ids]
+        docs = []
+        # doc_ids could be empty
+        if not doc_ids:
+            return 'No Hints'
+        for doc_id in doc_ids:
+            docs = [{
+                'descrption': id2bo[doc_id]['ba'], 
+                'virtual_table': id2bo[doc_id]['vt']
+            } for doc_id in doc_ids]
         
         hint = '\nDescriptions and Virtual Tables:\n'
         hint += json.dumps({j: doc for j, doc in enumerate(docs)}, indent=4)
@@ -361,7 +367,7 @@ def task_gen_template(
 
     # filename pattern [prefix][db_id].json
     # retrieved:
-    # test: [{db_id, sample_id, retrieved, }]
+    # test: [{db_id, sample_id, retrieved, }] or empty
     # dev: {db_id: [bo_id1, ...]}
     processed_db_ids = [p.stem.split('-')[-1] for p in prediction_path.glob(f'{prefix}*.json')]
     if processed_db_ids:
@@ -387,8 +393,10 @@ def task_gen_template(
             col_explanation=tables[db_id].col_explanation
         )
         if with_bos:
-            id2bo = {} 
-            for x in bos[db_id]:
+            # one-to-one mapping in BOs
+            id2bo = {}
+            retrieved_bos = bos.get(db_id, [])
+            for x in retrieved_bos:
                 id2bo[x['sample_id']] = x
 
         results = []
@@ -744,7 +752,8 @@ def evaluate_exec(
         eval_data2doc_ids: dict[str, set[int]],  # key(sample_id+pred_sql): {doc_id}
         eval_file: Path, 
         num_cpus: int = 4, 
-        meta_time_out: float = 30.0
+        meta_time_out: float = 30.0,
+        prefix: str = 'x-'
     ): 
     eval_path = eval_file.parent
     n_batch = 2000
@@ -782,12 +791,12 @@ def evaluate_exec(
                 result['doc_ids'] = []
                 batch_results.append(result)
 
-        with open(eval_path / f'temp_exec-{batch_i}.json', 'w') as f:
+        with open(eval_path / f'{prefix}temp_exec-{batch_i}.json', 'w') as f:
             json.dump(batch_results, f, indent=4)
 
     final_results = []
     for i in range(len(batches)):
-        with open(eval_path / f'temp_exec-{i}.json') as f:
+        with open(eval_path / f'{prefix}temp_exec-{i}.json') as f:
             temp = json.load(f)
         final_results.extend(temp)
 
@@ -796,7 +805,7 @@ def evaluate_exec(
 
     # remove all temp files
     for i in range(len(batches)):
-        (eval_path / f'temp_exec-{i}.json').unlink()
+        (eval_path / f'{prefix}temp_exec-{i}.json').unlink()
 
     # assert len(exec_result) == len(eval_data['sample_ids']), f"Length of exec_result({len(exec_result)}) and eval_data({len(eval_data['sample_ids'])}) should be the same"
     # final_results = []
@@ -823,6 +832,7 @@ def evaluate_merit(
         eval_data2doc_ids: dict[str, set[int]],  # key(sample_id+pred_sql): {doc_id}
         parsed_queries: dict[str, dict[str, Any]],  # {pred/target: {pred_sql/target_sql: parsed_query}}
         eval_file: Path, 
+        prefix: str = 'x-'
     ):
     eval_path = eval_file.parent
     n_batch = 2000
@@ -878,12 +888,12 @@ def evaluate_merit(
                     'doc_ids': []
                 })
 
-        with open(eval_path / f'temp_merit-{batch_i}.json', 'w') as f:
+        with open(eval_path / f'{prefix}temp_merit-{batch_i}.json', 'w') as f:
             json.dump(results, f, indent=4)
 
     final_results = []
     for i in range(len(batches)):
-        with open(eval_path / f'temp_merit-{i}.json') as f:
+        with open(eval_path / f'{prefix}temp_merit-{i}.json') as f:
             temp = json.load(f)
         final_results.extend(temp)
 
@@ -892,174 +902,7 @@ def evaluate_merit(
 
     # remove all temp files
     for i in range(len(batches)):
-        (eval_path / f'temp_merit-{i}.json').unlink()
-
-    # keys = []
-    # target_parsed = []
-    # pred_parsed = []
-    # target_complexities = []
-    # for i in range(len(eval_data['sample_ids'])):
-    #     sample_id = eval_data['sample_ids'][i]
-    #     pred_sql = eval_data['pred_queries'][i]
-    #     target_sql = eval_data['target_queries'][i]
-    #     pred_parsed.append(parsed_queries['pred'][pred_sql])
-    #     target_parsed.append(parsed_queries['target'][target_sql])
-    #     target_complexities.append(get_complexity(parsed_queries['target'][target_sql]))
-        
-    #     key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
-    #     keys.append(key)
-    
-    # structural_scores = get_all_structural_score(pred_parsed, target_parsed)
-    # semantic_scores = get_all_semantic_score(pred_parsed, target_parsed)
-
-    # epsilon = 1e-9
-    # structural_scores: np.ndarray = np.array(structural_scores)
-    # semantic_scores: np.ndarray = np.array(semantic_scores)
-    # f1_scores: np.ndarray = 2 * (structural_scores * semantic_scores) / (structural_scores + semantic_scores + epsilon)
-
-    # results = []
-    # for i in range(len(eval_data['sample_ids'])):
-    #     key = keys[i]
-    #     doc_ids = eval_data2doc_ids.get(key)
-    #     if doc_ids:
-    #         for doc_id in doc_ids:
-    #             results.append({
-    #                 'sample_id': eval_data['sample_ids'][i],
-    #                 'structural_score': structural_scores[i],
-    #                 'semantic_score': semantic_scores[i],
-    #                 'f1_score': f1_scores[i],
-    #                 'target_complexity': target_complexities[i],
-    #                 'doc_ids': [doc_id]
-    #             })
-    #     else:
-    #         results.append({
-    #             'sample_id': eval_data['sample_ids'][i],
-    #             'structural_score': structural_scores[i],
-    #             'semantic_score': semantic_scores[i],
-    #             'f1_score': f1_scores[i],
-    #             'target_complexity': target_complexities[i],
-    #             'doc_ids': []
-    #         })
-
-# def valid_bo(
-#         samples: list[SpiderSample|BirdSample],
-#         tables: dict[str, DatabaseModel],
-#         bos: dict[str, list[dict[str, str]]],
-#         chain: RunnableSequence,
-#         prediction_path: Path,
-#         file_name: str = '[args.ds]_[args.type]',
-#         split_k: int = 2,
-#     ):
-#     # "[file_name]_[db_id]-[idx_bo]"
-#     # restart from checkpoint
-#     processed_files = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
-#     if processed_files:
-#         bos = dict([x for x in bos.items() if x[0] not in processed_files])
-#         print(f'Skip some processed db_ids: {len(processed_files)} {processed_files[-5:]}')
-
-#     for detail_file_name, train_bos in bos.items():
-#         set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{detail_file_name}.db"))
-#         train_bos = train_bos['train_bos']
-#         db_id = detail_file_name.split('-')[0]    
-#         schema_str = get_schema_str(
-#             schema=tables[db_id].db_schema, 
-#             foreign_keys=tables[db_id].foreign_keys,
-#             col_explanation=tables[db_id].col_explanation
-#         )
-#         results = []
-#         x_samples = list(filter(lambda x: x.db_id == db_id, samples))
-#         iterator = list(product(train_bos, x_samples))
-#         iterator = tqdm(iterator, total=len(iterator), desc=f"{detail_file_name}")
-#         for bo, sample in iterator:
-#             res = {
-#                 'sample_id': sample.sample_id,
-#                 'gold_sql': sample.final.sql,
-#                 'question': sample.final.question,
-#                 'retrieved': bo['sample_id'],
-#             }
-#             question = sample.final.question
-#             hint = '\nDescriptions and Virtual Tables:\n'
-#             hint += json.dumps({'description': bo['ba'], 'virtual_table': bo['vt']}, indent=4)
-#             hint += '\n'
-#             input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
-#             with get_openai_callback() as cb:
-#                 output = chain.invoke(input=input_data)
-
-#             res.update({
-#                 'rationale': output.rationale,
-#                 'pred_sql': output.sql,
-#                 'token_usage': {'tokens': cb.total_tokens, 'cost': cb.total_cost}
-#             })
-#             results.append(res)
-
-#         with open(prediction_path / f'{file_name}_{detail_file_name}.json', 'w') as f:
-#             json.dump(results, f, indent=4)
-
-# def predict_sql_bo(
-#         samples: list[SpiderSample|BirdSample],
-#         tables: dict[str, DatabaseModel],
-#         test_bos: dict[str, dict[str, list[str]|int]],
-#         chain: RunnableSequence,
-#         prediction_path: Path,
-#         file_name: str = '[args.ds]_[args.type]_[args.scenario]',
-#         split_k: int = 3,
-#         k_retrieval: int = 5,  # for test
-#         n_retrieval: int = 1,   # for test
-#         score_threshold: float = 0.65,
-#         use_reranker: bool = False,
-#         is_question_query: bool = False
-#     ):
-#     processed_db_ids = [p.stem.split('_', split_k)[-1] for p in prediction_path.glob(f'{file_name}_*')]
-#     # restart from checkpoint
-#     if processed_db_ids:
-#         samples = [sample for sample in samples if sample.db_id not in processed_db_ids]
-#         print(f'Skip some processed db_ids: {len(processed_db_ids)} {processed_db_ids[-5:]}')
-
-#     samples_by_db_id = defaultdict(list)
-#     for sample in samples:
-#         samples_by_db_id[sample.db_id].append(sample)
-
-#     if use_reranker:
-#         cross_encoder = HuggingFaceCrossEncoder(model_name='cross-encoder/ms-marco-MiniLM-L-6-v2')
-#     else:
-#         cross_encoder = None
-
-#     # use train set to evaluate development set
-#     for db_id, samples in samples_by_db_id.items():
-#         set_llm_cache(SQLiteCache(database_path=f"./cache/{prediction_path.stem}_{file_name}_{db_id}.db"))
-#         print(f'[{db_id}] Creating vector store...')
-#         vectorstore = get_vector_store(test_bos, is_question_query)
-#         retriever = get_retriever(
-#             vectorstore, db_id, cross_encoder,
-#             n_retrieval, k_retrieval, score_threshold, use_reranker
-#         )
-#         schema_str = get_schema_str(
-#             schema=tables[db_id].db_schema, 
-#             foreign_keys=tables[db_id].foreign_keys,
-#             col_explanation=tables[db_id].col_explanation
-#         )
-#         results = []
-#         for sample in tqdm(samples, total=len(samples), desc=f"{db_id}"):
-#             question = sample.final.question
-#             docs = retriever.invoke(question)
-#             hint = '\nDescriptions and Virtual Tables:\n'
-#             hint += json.dumps({j: {'description': doc.page_content, 'virtual_table': doc.metadata['vt']} for j, doc in enumerate(docs)}, indent=4)
-#             hint += '\n'
-#             input_data = {'schema': schema_str, 'input_query': question, 'hint': hint}
-    
-#             with get_openai_callback() as cb:
-#                 output = chain.invoke(input=input_data)
-            
-#             res = {}
-#             res['sample_id'] = sample.sample_id
-#             res['rationale'] = output.rationale
-#             res['pred_sql'] = output.sql
-#             res['retrieved'] = [doc.metadata['sample_id'] for doc in docs]
-#             res['token_usage'] = {'tokens': cb.total_tokens, 'cost': cb.total_cost}
-#             results.append(res)
-
-#         with open(prediction_path / f'{file_name}_{db_id}.json', 'w') as f:
-#             json.dump(results, f, indent=4)
+        (eval_path / f'{prefix}temp_merit-{i}.json').unlink()
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser(description='Zero-shot SQL generation with OpenAI')
@@ -1086,7 +929,7 @@ if __name__ == '__main__':
     parser.add_argument('--prefix', type=str, default='x-', help='Prefix for the prediction files')
     parser.add_argument('--num_cpus', type=int, default=3, help='Number of CPUs to evaluate execution results')
     parser.add_argument('--n_bos_sample', type=int, default=30, help='Number of BOs to sample')
-    parser.add_argument('--n_bos_select', type=int, default=10, help='Number of BOs to select')
+    parser.add_argument('--n_bos_select', type=int, default=25, help='Number of BOs to select')
     args = parser.parse_args()
 
     proj_path = Path('.').resolve()
@@ -1112,6 +955,8 @@ if __name__ == '__main__':
 
     if args.task == 'create_bo':
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
 
         prompt = PromptTemplate(
             template=Prompts.bo_description,
@@ -1140,9 +985,13 @@ if __name__ == '__main__':
 
     elif args.task == 'retrieve':
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
 
-        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-        assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+        bo_type = 'train' if args.type == 'dev' else 'test'
+        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_{bo_type}_bo.json'
+        if not bo_path.exists():
+            raise NameError(f'Run with the `task=create_bo, type={bo_type}` first. {bo_path}')
         with bo_path.open() as f:
             bos = json.load(f)
         bos = remove_duplicate_bos(bos)
@@ -1193,9 +1042,14 @@ if __name__ == '__main__':
         # file_p2 = 'test' if is_test else 'dev'
         # file_name = f'{file_p1}-{file_p2}.json'
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
+        
         if args.with_bos:
-            bo_path: Path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-            assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+            bo_type = 'train' if args.type == 'dev' else 'test'
+            bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_{bo_type}_bo.json'
+            if not bo_path.exists():
+                raise NameError(f'Run with the `task=create_bo, type={bo_type}` first. {bo_path}')
             with bo_path.open() as f:
                 bos = json.load(f)
             bos = remove_duplicate_bos(bos)
@@ -1251,6 +1105,8 @@ if __name__ == '__main__':
         # file_p2 = 'test' if is_test else 'dev'
         # file_name = f'{file_p1}-{file_p2}.json'
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
 
         file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
         template_path = experiment_folder / 'predictions' / 'gen_template' / f'{file_name}.json'
@@ -1340,6 +1196,8 @@ if __name__ == '__main__':
             return string
         
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
 
         file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
         keyword_path = experiment_folder / 'predictions' / 'keyword_extraction' / f'{file_name}.json'
@@ -1406,6 +1264,8 @@ if __name__ == '__main__':
         # file_p2 = 'test' if is_test else 'dev'
         # file_name = f'{file_p1}-{file_p2}.json'
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
 
         file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
         values_path = experiment_folder / 'predictions' / 'search_value' / f'{file_name}.json'
@@ -1500,6 +1360,8 @@ if __name__ == '__main__':
         
         logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
 
         file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
         eval_target_path = experiment_folder / 'predictions' / args.eval_target / f'{file_name}.json'
@@ -1578,7 +1440,8 @@ if __name__ == '__main__':
                 eval_data2doc_ids,
                 execution_result_path,
                 num_cpus=args.num_cpus,
-                meta_time_out=30.0
+                meta_time_out=30.0,
+                prefix=args.prefix
             )
 
         # semantic and structural evaluation
@@ -1590,84 +1453,88 @@ if __name__ == '__main__':
                 eval_data, 
                 eval_data2doc_ids,
                 parsed_queries,
-                merit_result_path
+                merit_result_path,
+                prefix=args.prefix
             )
     
     elif args.task == 'aggregate':
-        file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
-
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-        db_ids = {s.sample_id: s.db_id for s in samples}
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
         
-        if args.with_bos:  # whether to use BOs or not
-            with open(experiment_folder / 'predictions' / 'retrieve' / f'{file_name}.json', 'r') as f:
-                retrieved = json.load(f)
-            retrieved = {r['sample_id']: r for r in retrieved}
-        else:
-            retrieved = {}
-
+        file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
+        samples_by_id = {s.sample_id: s for s in samples}
+        
         if args.eval_target == 'fill_in':  # pipeline method
             # gen_template
             with open(experiment_folder / 'predictions' / 'gen_template' / f'{file_name}.json', 'r') as f:
                 sql_templates = json.load(f)
-            sql_templates = {r['sample_id']: r for r in sql_templates}
 
             # keyword_extraction
             with open(experiment_folder / 'predictions' / 'keyword_extraction' / f'{file_name}.json', 'r') as f:
                 keyword_extraction = json.load(f)
-            keyword_extraction = {r['sample_id']: r for r in keyword_extraction}
 
             # search_value
             with open(experiment_folder / 'predictions' / 'search_value' / f'{file_name}.json', 'r') as f:
                 search_value = json.load(f)
-            search_value = {r['sample_id']: r for r in search_value}
         else:
-            sql_templates = {}
-            keyword_extraction = {}
-            search_value = {}
+            sql_templates = []
+            keyword_extraction = []
+            search_value = []
 
         with open(experiment_folder / 'evals' / f'execution_result-{file_name}.json', 'r') as f:
             exec_results = json.load(f)
-        exec_results = {r['sample_id']: r for r in exec_results}
 
         with open(experiment_folder / 'evals' / f'merit_result-{file_name}.json', 'r') as f:
             merit_results = json.load(f)
-        merit_results = {r['sample_id']: r for r in merit_results}
 
         all_results = defaultdict(list)
+        # column: sample_id, db_id, retrieved, exec_res, structural_score, semantic_score, f1_score, target_complexity
+        # if fill_in: bo_used, keywords, values
+        for i in range(len(exec_results)):
+            sample_id = exec_results[i]['sample_id']
+            doc_ids = exec_results[i]['doc_ids']
+            exec_res = exec_results[i]['res']
+            structural_score = merit_results[i]['structural_score']
+            semantic_score = merit_results[i]['semantic_score']
+            f1_score = merit_results[i]['f1_score']
+            target_complexity = merit_results[i]['target_complexity']
+            sample = samples_by_id[sample_id]
+            db_id = sample.db_id
 
-        for sample_id in merit_results.keys():
             all_results['sample_id'].append(sample_id)
-            all_results['db_id'].append(db_ids[sample_id])
-            if args.with_bos:
-                bo_ids = ','.join(map(str, retrieved[sample_id]['retrieved']))
-                bo_used = int(sql_templates[sample_id]['hint_used'])
-                all_results['bo_ids'].append(bo_ids)
-                all_results['bo_used'].append(bo_used)
+            all_results['db_id'].append(db_id)
+            all_results['retrieved'].append(','.join(map(str, doc_ids)))
+            all_results['exec_res'].append(exec_res)
+            all_results['structural_score'].append(structural_score)
+            all_results['semantic_score'].append(semantic_score)
+            all_results['f1_score'].append(f1_score)
+            all_results['target_complexity'].append(target_complexity)
+            
 
             if args.eval_target == 'fill_in':
-                keywords = json.dumps({column_name: kws for column_name, kws in keyword_extraction[sample_id]['keywords'].items() if kws})
-                # keywords = False if keywords == '{}' else True
-                values = json.dumps(search_value[sample_id]['values'])
-                # values = False if values == '{}' else True
+                if args.with_bos:
+                    bo_used = int(sql_templates[i]['hint_used'])
+                    all_results['bo_used'].append(bo_used)
+                keywords = json.dumps({column_name: kws for column_name, kws in keyword_extraction[i]['keywords'].items() if kws})
+                values = json.dumps(search_value[i]['values'])
                 all_results['keywords'].append(keywords)
                 all_results['values'].append(values)
-            all_results['exec_res'].append(exec_results[sample_id]['res'])
-            all_results['structural_score'].append(merit_results[sample_id]['structural_score'])
-            all_results['semantic_score'].append(merit_results[sample_id]['semantic_score'])
-            all_results['f1_score'].append(merit_results[sample_id]['f1_score'])
-            all_results['target_complexity'].append(merit_results[sample_id]['target_complexity'])
-        
+
         df = pd.DataFrame(all_results)
         df.to_csv(eval_path / f'result-{file_name}.csv', index=False)
+        print("Aggregated results saved to:", eval_path / f'result-{file_name}.csv')
 
     elif args.task == 'direct':
         samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-        
+        # drop samples that are in SKIP_DB_IDS
+        samples = [s for s in samples if s.db_id not in SKIP_DB_IDS]
         file_name = f'{"with_bos" if args.with_bos else "no_bos"}-{args.type}'
         if args.with_bos:
-            bo_path: Path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-            assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
+            bo_type = 'train' if args.type == 'dev' else 'test'
+            bo_path: Path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_{bo_type}_bo.json'
+            if not bo_path.exists():
+                raise NameError(f'Run with the `task=create_bo, type={bo_type}` first. {bo_path}')
             with bo_path.open() as f:
                 bos = json.load(f)
             bos = remove_duplicate_bos(bos)
@@ -1731,6 +1598,67 @@ if __name__ == '__main__':
         with open(prediction_path / file_name, 'w') as file:
             json.dump(all_results, file, indent=4)
 
+    elif args.task == 'valid_bo':
+        eval_path = experiment_folder / 'evals'
+        no_bos_path = eval_path / f'result-no_bos-{args.type}.csv'
+        with_bos_path = eval_path / f'result-with_bos-{args.type}.csv'
+        assert no_bos_path.exists(), f'Run with the `task=evaluate, type={args.type}` first'
+        assert with_bos_path.exists(), f'Run with the `task=evaluate, type={args.type}` first'
+
+        df_no_bos = pd.read_csv(no_bos_path)
+        df_no_bos = df_no_bos[~df_no_bos['db_id'].isin(SKIP_DB_IDS)]
+        df_no_bos.reset_index(drop=True, inplace=True)
+        df_no_bos.drop(columns=['retrieved'], inplace=True)
+        df_with_bos = pd.read_csv(with_bos_path)
+        df_cates = df_no_bos.groupby('db_id')['target_complexity'].apply(_get_categories).rename('category').apply(_format_interval)
+        df_no_bos = pd.merge(df_no_bos, df_cates.reset_index('db_id', drop=True), left_index=True, right_index=True)
+        df = pd.merge(
+            left=df_with_bos,
+            right=df_no_bos,
+            how='inner',
+            on=['db_id'],
+            suffixes=('_bo', '')
+        )
+
+        group_column = ['db_id', 'retrieved']
+        # count the exec result with/without BOs
+        # > 0 means improved with BOs
+        # = 0 means execution is same with/witout BOs
+        # < 0 means worse with BOs
+        execution_improvement = df.groupby(group_column)[['exec_res', 'exec_res_bo']].sum().diff(axis=1)['exec_res_bo'].rename('execution_improvement')
+
+        # no_bos: tsed between (source=pred_sql, target=target_sql)
+        # with_bos: tsed between (source=pred_sql, target=target_sql)
+        # merit = tsed(pred_sql_bo, target_sql) - tsed(pred_sql, target_sql)
+        # merit > 0 means similarity to the targer_sql improved with BOs
+        # merit = 0 means similarity to the target_sql is same with/without BOs
+        # merit < 0 means similarity to the target_sql getting worse with BOs
+        merit_structural = df.groupby(group_column)[['structural_score', 'structural_score_bo']].mean().diff(axis=1)['structural_score_bo'].rename('merit_structural')
+        merit_semantic = df.groupby(group_column)[['semantic_score', 'semantic_score_bo']].mean().diff(axis=1)['semantic_score_bo'].rename('merit_semantic')
+        merit = df.groupby(group_column)[['f1_score', 'f1_score_bo']].mean().diff(axis=1)['f1_score_bo'].rename('merit')
+
+        ranks = merit.reset_index().groupby(['db_id'])['merit'].rank(method='first', ascending=False).rename('rank').astype(np.int64)
+        merit = pd.concat([merit.reset_index(), ranks], axis=1)
+        merit_by_rank = merit.sort_values(by=['db_id', 'rank'], ascending=True)
+        merit_by_rank.to_csv(experiment_folder / 'evals' / f'merits.csv', index=False)
+
+        bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
+        with bo_path.open() as f:
+            bos = json.load(f)
+
+        test_bos = defaultdict(list)
+        for x in merit_by_rank.loc[:, ['db_id', 'retrieved']].to_dict(orient='records'):
+            if len(test_bos[x['db_id']]) >= args.n_bos_select:
+                continue
+            bo_id = x['retrieved']
+            db_id = x['db_id']
+            bo = list(filter(lambda x: x['sample_id'] == bo_id, bos[db_id]))[0]
+            test_bos[db_id].append(bo)
+
+        with (experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_test_bo.json').open('w') as f:
+            json.dump(test_bos, f, indent=4)
+
+        print('BOs selected for test set saved to:', experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_test_bo.json')
     # elif args.task == 'valid_bo_prepare_batch_run':
     #     samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
     #     df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'bird_dev.csv')

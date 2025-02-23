@@ -241,7 +241,7 @@ You will be provided a hint to help you.
 All the values in the SQL query are replaced with the following placeholders:
 - `[PLACEHOLDER-TYPE:STRING]` for string values
 - `[PLACEHOLDER-TYPE:NUMERIC]` for numeric values
-You can use or modify the hint to generate the final SQL query or not to use.
+You can use or modify the hint to generate the final SQL query or if it is not useful please ignore the hint.
 
 ### FORMATTING
 Your output should be of the following JSON format:
