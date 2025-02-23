@@ -2,7 +2,6 @@ import warnings
 import sqlglot
 from sqlglot import expressions as exp
 
-import os
 import sys
 import gc
 import numpy as np
@@ -22,7 +21,6 @@ from itertools import product, pairwise
 from func_timeout import func_timeout, FunctionTimedOut
 import multiprocessing as mp
 from sqlite3 import OperationalError
-import contextlib
 # import spacy
 # try:
 #     NLP_SPACY = spacy.load('en_core_web_md')
@@ -587,7 +585,7 @@ def execute_sql(
     skip_db_ids = ['movie_platform']
     db_id = Path(db_file).stem
     if db_id in skip_db_ids:
-        return 0, True
+        return 0, False
     db = SqliteDatabase(db_file=db_file)
     try:
         target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
@@ -615,8 +613,6 @@ def execute_model(
     sample_id: int, 
     meta_time_out: float
 ):
-    pid = os.getpid()
-    logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id}")
     try:
         # with contextlib.redirect_stderr(io.StringIO()):
         res, target_error = func_timeout(
@@ -625,17 +621,16 @@ def execute_model(
             args=(pred, target, db_file),
         )
     except KeyboardInterrupt:
-        logging.info(f"Worker {pid}: Received KeyboardInterrupt. Exiting.")
         sys.exit(0)
     except FunctionTimedOut:
-        logging.warning(f"Worker {pid}: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
-        res, target_error = 0, False
+        result = [(f"timeout",)]
+        res = 0
+        target_error = False
         gc.collect()
     except Exception as e:
-        logging.error(f"Worker {pid}: Exception in execute_model for sample_id {sample_id}: {e}")
-        res, target_error = 0, False
-    finally:
-        logging.info(f"Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
+        result = [(f"error",)]  # possibly len(query) > 512 or not executable
+        res = 0
+        target_error = False
     
     result = {"sample_id": sample_id, "res": res, "target_error": target_error}
     return result
@@ -688,6 +683,7 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
     
     pool.close()
     pool.join()
+    pbar.close()
     
     return exec_result
 
