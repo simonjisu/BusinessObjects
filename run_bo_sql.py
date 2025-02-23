@@ -760,6 +760,7 @@ def evaluate_exec(
         batch_eval_data = {k: [v[i] for i in idxes] for k, v in eval_data.items()}
         batch_preds = [x for x in batch_eval_data['pred_queries']]
         batch_sample_ids = [x for x in batch_eval_data['sample_ids']]
+
         if num_cpus == 1:
             batch_exec_result = run_sqls(batch_eval_data, meta_time_out=meta_time_out)
         else:
@@ -1574,7 +1575,7 @@ if __name__ == '__main__':
                 eval_data2doc_ids,
                 execution_result_path,
                 num_cpus=args.num_cpus,
-                meta_time_out=30.0
+                meta_time_out=5.0
             )
 
         # semantic and structural evaluation

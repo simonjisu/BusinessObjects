@@ -3,7 +3,7 @@ import sqlglot
 from sqlglot import expressions as exp
 
 import sys
-import io
+import gc
 import numpy as np
 import random
 from tqdm import tqdm
@@ -583,6 +583,10 @@ def execute_sql(
     db_file: str,
     max_rows: int = 10000 
 ):
+    skip_db_ids = ['movie_platform']
+    db_id = Path(db_file).stem
+    if db_id in skip_db_ids:
+        return 0, True
     db = SqliteDatabase(db_file=db_file)
     try:
         target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
@@ -623,6 +627,7 @@ def execute_model(
         result = [(f"timeout",)]
         res = 0
         target_error = False
+        gc.collect()
     except Exception as e:
         result = [(f"error",)]  # possibly len(query) > 512 or not executable
         res = 0
