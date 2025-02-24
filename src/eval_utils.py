@@ -10,7 +10,8 @@ import random
 from tqdm import tqdm
 from pathlib import Path
 from collections import defaultdict
-
+import time
+import sqlite3
 from zss import simple_distance, Node
 from apted import APTED
 from apted.helpers import Tree
@@ -31,6 +32,7 @@ from sqlite3 import OperationalError
 import logging
 from bert_score import score as bscore
 from src.database import SqliteDatabase
+from concurrent.futures import ProcessPoolExecutor, TimeoutError
 
 SKIP_DB_IDS = ['movie_platform']
 
@@ -579,44 +581,349 @@ def check_if_exists_orderby(sql):
     return False
 
 
-def execute_sql(
-    pred: str, 
-    target: str, 
-    db_file: str,
-    max_rows: int = 10000 
-):
-    db_id = Path(db_file).stem
-    if db_id in SKIP_DB_IDS:
-        return 0, False
-    db = SqliteDatabase(db_file=db_file)
-    try:
-        target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
-        target_res = db.execute(target_sql, rt_pandas=False)
-        target_error = False
-    except OperationalError as e:
-        target_error = True
-    try:
-        pred_sql = f'SELECT * FROM ({pred}) LIMIT {max_rows};'  # avoid to load too many rows
-        pred_res = db.execute(pred_sql, rt_pandas=False)
-        exists_orderby = check_if_exists_orderby(target)
-        res = int(result_eq(pred_res, target_res, order_matters=exists_orderby))
-    except KeyboardInterrupt:
-        sys.exit(0)
-    except Exception as e:
-        res = 0
-        target_error = False
+# def execute_sql(predicted_sql, ground_truth, db_path, calculate_func):
+#     conn = sqlite3.connect(db_path)
+#     # Connect to the database
+#     cursor = conn.cursor()
+#     cursor.execute(predicted_sql)
+#     predicted_res = cursor.fetchall()
+#     cursor.execute(ground_truth)
+#     ground_truth_res = cursor.fetchall()
+#     conn.close()
+#     res = calculate_func(predicted_res, ground_truth_res)
+#     return res
 
-    return res, target_error
+# def execute_sql(
+#     pred: str, 
+#     target: str, 
+#     db_file: str,
+#     max_rows: int = 10000 
+# ):
+#     with sqlite3.connect(db_file) as conn:
+#         cursor = conn.cursor()
+#         try:
+#             target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'  # avoid to load too many rows
+#             target_res = cursor.execute(target_sql).fetchall()
+#             target_error = False
+#         except OperationalError as e:
+#             target_error = True
+#         try:
+#             pred_sql = f'SELECT * FROM ({pred}) LIMIT {max_rows};'  # avoid to load too many rows
+#             pred_res = cursor.execute(pred_sql).fetchall()
+#             exists_orderby = check_if_exists_orderby(target)
+#             res = int(result_eq(pred_res, target_res, order_matters=exists_orderby))
+#         except KeyboardInterrupt:
+#             sys.exit(0)
+#         except Exception as e:
+#             res = 0
+#             target_error = False
+#             return res, target_error
+#     return res, target_error
 
-def execute_model(
-    pred: str, 
-    target: str, 
-    db_file: str, 
-    sample_id: int, 
-    meta_time_out: float
-):
+# def execute_sql_process(args):
+#     return execute_sql(*args)
+
+# def execute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float):
+#     with ProcessPoolExecutor(max_workers=3) as executor:
+#         future = executor.submit(execute_sql_process, (pred, target, db_file))
+#         try:
+#             res, target_error = future.result(timeout=meta_time_out)
+#         except TimeoutError:
+#             # The process is terminated and resources (including SQLite connection) are freed.
+#             logging.info(f"TimeoutError for sample_id {sample_id} after {meta_time_out} seconds.")
+#             res, target_error = 0, False
+#         except Exception as e:
+#             res, target_error = 0, False
+
+#     logging.info(f"Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
+#     result = {"sample_id": sample_id, "res": res, "target_error": target_error}
+#     return result
+
+# def execute_model(
+#     pred: str, 
+#     target: str, 
+#     db_file: str, 
+#     sample_id: int, 
+#     meta_time_out: float
+# ):
+#     pid = os.getpid()
+#     try:
+#         # with contextlib.redirect_stderr(io.StringIO()):
+#         gc.collect()
+#         res, target_error = func_timeout(
+#             meta_time_out,
+#             execute_sql,
+#             args=(pred, target, db_file),
+#         )
+#     except KeyboardInterrupt:
+#         sys.exit(0)
+#     except FunctionTimedOut:
+#         logging.warning(f"Worker {pid}: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
+#         result = [(f"timeout",)]
+#         res = 0
+#         target_error = False
+#         gc.collect()
+#     except Exception as e:
+#         result = [(f"error",)]  # possibly len(query) > 512 or not executable
+#         res = 0
+#         target_error = False
+#         gc.collect()
+    
+#     logging.info(f'Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}')
+#     result = {"sample_id": sample_id, "res": res, "target_error": target_error}
+#     return result
+
+# def run_sqls(eval_data, meta_time_out=30.0):
+#     sample_ids = eval_data['sample_ids']
+#     pred_queries = eval_data['pred_queries']
+#     target_queries = eval_data['target_queries']
+#     db_paths = eval_data['db_paths']
+#     exec_result = [None] * len(sample_ids)
+
+#     samples_by_db = defaultdict(list)
+#     for i, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
+#         samples_by_db[db_file].append((i, sample_id, pred, target))
+
+#     for db_file, samples in samples_by_db.items():
+#         for i, sample_id, pred, target in tqdm(
+#             samples, total=len(samples), desc=f"Processing {Path(db_file).stem}"
+#         ):
+#             if Path(db_file).stem in SKIP_DB_IDS:
+#                 result = {"sample_id": sample_id, "res": 0, "target_error": False}
+#             else:
+#                 result = execute_model(pred, target, db_file, sample_id, meta_time_out)
+#             exec_result[i] = result
+#             # time.sleep(1)
+        
+#     return exec_result
+
+# ----
+# def worker(
+#         index: int, 
+#         sample_id: int, 
+#         pred: str, 
+#         target: str, 
+#         db_file: str, 
+#         meta_time_out: float, 
+#         output_queue: mp.Queue
+#     ):
+#     """
+#     Worker function to execute a model and put the result in a Queue.
+#     """
+#     try:
+#         result = execute_model(pred, target, db_file, sample_id, meta_time_out)
+#         # Attach the sample's index so we can reassemble the results in order.
+#         result['index'] = index
+#     except Exception as e:
+#         logging.error(f"Worker error for sample_id {sample_id}: {e}")
+#         result = {"sample_id": sample_id, "res": 0, "target_error": True, "index": index}
+#     output_queue.put(result)
+
+# def run_sqls_parallel(eval_data, num_cpus=3, meta_time_out=30.0):
+#     sample_ids = eval_data['sample_ids']
+#     pred_queries = eval_data['pred_queries']
+#     target_queries = eval_data['target_queries']
+#     db_paths = eval_data['db_paths']
+#     exec_result = [None] * len(sample_ids)
+
+#     samples_by_db = defaultdict(list)
+#     for i, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
+#         samples_by_db[db_file].append((i, sample_id, pred, target))
+
+#     for db_file, samples in samples_by_db.items():
+#         # Create a Queue to receive worker results.
+#         q = mp.Queue()
+#         running_procs = []
+#         proc_map = {}  # Map process objects to (index, sample_id) for error handling.
+
+#         for sample in tqdm(samples, total=len(samples), 
+#                            desc=f"Processing {Path(db_file).stem}"):
+#             i, sample_id, pred, target = sample
+#             # If this DB is in SKIP_DB_IDS, handle synchronously.
+#             if Path(db_file).stem in SKIP_DB_IDS:
+#                 result = {"sample_id": sample_id, "res": 0, "target_error": False}
+#                 exec_result[i] = result
+#             else:
+#                 # Limit the number of concurrent processes.
+#                 while len(running_procs) >= num_cpus:
+#                     for p in running_procs:
+#                         p.join(timeout=0.1)
+#                     running_procs = [p for p in running_procs if p.is_alive()]
+                
+#                 # Start a new process for this sample.
+#                 p: mp.Process = mp.Process(
+#                     target=worker,
+#                     args=(i, sample_id, pred, target, db_file, meta_time_out, q)
+#                 )
+#                 p.start()
+#                 running_procs.append(p)
+#                 proc_map[p] = (i, sample_id)
+
+#         # After starting all processes for this db_file, ensure they all finish.
+#         for p in running_procs:
+#             # Wait a bit longer than meta_time_out for the process to finish.
+#             p.join(timeout=meta_time_out + 5)
+#             if p.is_alive():
+#                 # If still alive, terminate it to prevent memory leakage.
+#                 i, sample_id = proc_map[p]
+#                 logging.warning(f"Terminating process for sample_id {sample_id} due to timeout.")
+#                 p.terminate()
+#                 p.join()
+#                 # Manually put a timeout result into the Queue.
+#                 timeout_result = {"sample_id": sample_id, "res": 0, "target_error": False, "index": i}
+#                 q.put(timeout_result)
+        
+#         # Retrieve all results from the Queue.
+#         while not q.empty():
+#             res = q.get()
+#             index = res.get('index')
+#             exec_result[index] = res
+
+#     return exec_result
+
+# # The rest of your code remains the same:
+# def execute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float):
+#     pid = os.getpid()
+#     try:
+#         gc.collect()
+#         res, target_error = func_timeout(
+#             meta_time_out,
+#             execute_sql,
+#             args=(pred, target, db_file),
+#         )
+#     except KeyboardInterrupt:
+#         sys.exit(0)
+#     except FunctionTimedOut:
+#         logging.warning(f"Worker {pid}: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
+#         res = 0
+#         target_error = False
+#         gc.collect()
+#     except Exception as e:
+#         logging.error(f"Worker {pid}: Exception for sample_id {sample_id}: {e}")
+#         res = 0
+#         target_error = False
+#         gc.collect()
+    
+#     logging.info(f'Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}')
+#     result = {"sample_id": sample_id, "res": res, "target_error": target_error}
+#     return result
+
+# def execute_sql(pred: str, target: str, db_file: str, max_rows: int = 10000):
+#     with sqlite3.connect(db_file) as conn:
+#         cursor = conn.cursor()
+#         try:
+#             target = target.replace(';', '')
+#             target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'
+#             target_res = cursor.execute(target_sql).fetchall()
+#             target_error = False
+#         except sqlite3.OperationalError:
+#             target_error = True
+#         try:
+#             pred = pred.replace(';', '')
+#             pred_sql = f'SELECT * FROM ({pred}) LIMIT {max_rows};'
+#             pred_res = cursor.execute(pred_sql).fetchall()
+#             exists_orderby = check_if_exists_orderby(target)
+#             res = int(result_eq(pred_res, target_res, order_matters=exists_orderby))
+#         except KeyboardInterrupt:
+#             sys.exit(0)
+#         except Exception as e:
+#             logging.error(f"execute_sql error: {e}")
+#             res = 0
+#             target_error = False
+#             return res, target_error
+#     return res, target_error
+# ----
+import os
+import sys
+import sqlite3
+import gc
+import logging
+from tqdm import tqdm
+from pathlib import Path
+from collections import defaultdict
+from func_timeout import func_timeout, FunctionTimedOut
+import multiprocessing
+
+# Assume SKIP_DB_IDS is defined somewhere in your code.
+# For example:
+# SKIP_DB_IDS = {"some_db_name", "another_db_name"}
+
+def worker(task_queue, output_queue):
+    """
+    Worker process that continuously processes tasks from task_queue and 
+    puts the results into output_queue.
+    """
+    while True:
+        task = task_queue.get()
+        if task is None:  # Sentinel value to exit
+            break
+        i, sample_id, pred, target, db_file, meta_time_out = task
+        try:
+            result = execute_model(pred, target, db_file, sample_id, meta_time_out)
+            result['index'] = i
+        except Exception as e:
+            logging.error(f"Worker error for sample_id {sample_id}: {e}")
+            result = {"sample_id": sample_id, "res": 0, "target_error": True, "index": i}
+        output_queue.put(result)
+
+def run_sqls_parallel2(eval_data, num_cpus=3, meta_time_out=30.0):
+    sample_ids = eval_data['sample_ids']
+    pred_queries = eval_data['pred_queries']
+    target_queries = eval_data['target_queries']
+    db_paths = eval_data['db_paths']
+    exec_result = [None] * len(sample_ids)
+
+    # Create queues for tasks and results.
+    task_queue = multiprocessing.Queue()
+    output_queue = multiprocessing.Queue()
+
+    # Organize tasks per database file.
+    samples_by_db = defaultdict(list)
+    for i, (sample_id, pred, target, db_file) in enumerate(
+        zip(sample_ids, pred_queries, target_queries, db_paths)
+    ):
+        samples_by_db[db_file].append((i, sample_id, pred, target))
+
+    # Enqueue tasks for all databases.
+    for db_file, samples in samples_by_db.items():
+        for sample in samples:
+            i, sample_id, pred, target = sample
+            if Path(db_file).stem in SKIP_DB_IDS:
+                # If skipping, add the result directly.
+                exec_result[i] = {"sample_id": sample_id, "res": 0, "target_error": False, "index": i}
+            else:
+                # Enqueue the task
+                task_queue.put((i, sample_id, pred, target, db_file, meta_time_out))
+
+    # Start a fixed number of worker processes.
+    workers = []
+    for _ in range(num_cpus):
+        p = multiprocessing.Process(target=worker, args=(task_queue, output_queue))
+        p.start()
+        workers.append(p)
+
+    # Signal the workers to exit by sending a sentinel for each worker.
+    for _ in range(num_cpus):
+        task_queue.put(None)
+
+    # Optionally, use tqdm to show progress.
+    total_tasks = sum(len(samples) for db_file, samples in samples_by_db.items()
+                      if Path(db_file).stem not in SKIP_DB_IDS)
+    for _ in tqdm(range(total_tasks), desc="Processing tasks"):
+        res = output_queue.get()
+        index = res.get('index')
+        exec_result[index] = res
+
+    # Ensure all workers have finished.
+    for p in workers:
+        p.join()
+
+    return exec_result
+
+def execute_model(pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float):
+    pid = os.getpid()
     try:
-        # with contextlib.redirect_stderr(io.StringIO()):
+        gc.collect()
         res, target_error = func_timeout(
             meta_time_out,
             execute_sql,
@@ -625,54 +932,49 @@ def execute_model(
     except KeyboardInterrupt:
         sys.exit(0)
     except FunctionTimedOut:
-        result = [(f"timeout",)]
+        logging.warning(f"[{pid}]: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
         res = 0
         target_error = False
         gc.collect()
     except Exception as e:
-        result = [(f"error",)]  # possibly len(query) > 512 or not executable
+        logging.error(f"[{pid}]: Exception for sample_id {sample_id}: {e}")
         res = 0
         target_error = False
-    
+        gc.collect()
+
+    logging.info(f'[{pid}]: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}')
     result = {"sample_id": sample_id, "res": res, "target_error": target_error}
     return result
 
-def run_sqls(eval_data, meta_time_out=30.0):
-    sample_ids = eval_data['sample_ids']
-    pred_queries = eval_data['pred_queries']
-    target_queries = eval_data['target_queries']
-    db_paths = eval_data['db_paths']
-    exec_result = [None] * len(sample_ids)
-
-    samples_by_db = defaultdict(list)
-    for i, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
-        samples_by_db[db_file].append((i, sample_id, pred, target))
-
-    for db_file, samples in samples_by_db.items():
-        
-        for i, sample_id, pred, target in tqdm(
-            samples, total=len(samples), desc=f"Processing {Path(db_file).stem}"
-        ):
-            result = execute_model(pred, target, db_file, sample_id, meta_time_out)
-            exec_result[i] = result
-        
-    return exec_result
-
-
-def worker_execute_sql(q: mp.Queue, pred: str, target: str, db_file: str):
-    """
-    Runs the execute_sql function and puts the (result, target_error) tuple into the queue.
-    """
-    try:
-        res, target_error = execute_sql(pred, target, db_file)
-        q.put((res, target_error))
-    except Exception as e:
-        logging.error(f"Worker {os.getpid()}: Exception in worker_execute_sql: {e}")
-        q.put((0, False))
+def execute_sql(pred: str, target: str, db_file: str, max_rows: int = 10000):
+    with sqlite3.connect(db_file) as conn:
+        cursor = conn.cursor()
+        try:
+            target = target.replace(';', '')
+            target_sql = f'SELECT * FROM ({target}) LIMIT {max_rows};'
+            target_res = cursor.execute(target_sql).fetchall()
+            target_error = False
+        except sqlite3.OperationalError:
+            target_error = True
+        try:
+            pred = pred.replace(';', '')
+            pred_sql = f'SELECT * FROM ({pred}) LIMIT {max_rows};'
+            pred_res = cursor.execute(pred_sql).fetchall()
+            exists_orderby = check_if_exists_orderby(target)
+            res = int(result_eq(pred_res, target_res, order_matters=exists_orderby))
+        except KeyboardInterrupt:
+            sys.exit(0)
+        except Exception as e:
+            logging.error(f"execute_sql error: {e}\n{pred_sql}\n{target_sql}")
+            res = 0
+            target_error = False
+            return res, target_error
+    return res, target_error
 
 def aexecute_model(
         pred: str, target: str, db_file: str, sample_id: int, meta_time_out: float, order: int):
     pid = os.getpid()
+    db_id = Path(db_file).stem
     # logging.info(f"Worker {pid}: Starting execute_model for sample_id {sample_id})")
     try:
         res, target_error = func_timeout(
@@ -681,17 +983,17 @@ def aexecute_model(
             args=(pred, target, db_file)
         )
     except KeyboardInterrupt:
-        logging.info(f"[{order}] Worker {pid}: Received KeyboardInterrupt. Exiting.")
+        logging.info(f"[{order}] PID-{pid}: Received KeyboardInterrupt. Exiting.")
         sys.exit(0)
     except FunctionTimedOut:
-        logging.warning(f"[{order}] Worker {pid}: FunctionTimedOut for sample_id {sample_id} after {meta_time_out} seconds.")
+        logging.warning(f"[{order}] PID-{pid}: FunctionTimedOut | {db_id}-{sample_id} after {meta_time_out} seconds.")
         res, target_error = 0, False
         gc.collect()
     except Exception as e:
-        logging.error(f"[{order}] Worker {pid}: Exception in execute_model for sample_id {sample_id}: {e}")
+        logging.error(f"[{order}] PID-{pid}: Exception in execute_model | {db_id}-{sample_id} : {e}")
         res, target_error = 0, False
     finally:
-        logging.info(f"[{order}] Worker {pid}: Finished execute_model for sample_id {sample_id} with res={res}, target_error={target_error}")
+        logging.info(f"[{order}] PID-{pid}: Finished execute_model | {db_id}-{sample_id} with res={res}, target_error={target_error}")
     
     # Include the order in the returned result
     return {"order": order, "sample_id": sample_id, "res": res, "target_error": target_error}
@@ -708,9 +1010,16 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
     db_paths = eval_data['db_paths']
     exec_results = [None] * len(sample_ids)
 
+    samples_by_db = defaultdict(list)
+    for i, (sample_id, pred, target, db_file) in enumerate(
+        zip(sample_ids, pred_queries, target_queries, db_paths)
+    ):
+        samples_by_db[db_file].append((i, sample_id, pred, target))
+
+
     # pbar = tqdm(total=len(sample_ids), desc="Processing execution", position=0)
     # Create a pool that recycles workers after each task to help release memory.
-    pool = mp.Pool(processes=num_cpus, maxtasksperchild=2)
+    pool = mp.Pool(processes=num_cpus, maxtasksperchild=1)
 
     def update(result):
         order = result['order']
@@ -721,14 +1030,17 @@ def run_sqls_parallel(eval_data, num_cpus=1, meta_time_out=30.0):
         }
         # pbar.update(1)
 
-    # Enumerate tasks to assign a unique order to each one.
-    for order, (sample_id, pred, target, db_file) in enumerate(zip(sample_ids, pred_queries, target_queries, db_paths)):
-        pool.apply_async(
-            aexecute_model,
-            args=(pred, target, db_file, sample_id, meta_time_out, order),
-            callback=update,
-        )
-
+    for db_file, samples in samples_by_db.items():
+        if Path(db_file).stem in SKIP_DB_IDS:
+            continue
+        for i, sample_id, pred, target in samples:
+            # Enumerate tasks to assign a unique order to each one.
+            pool.apply_async(
+                aexecute_model,
+                args=(pred, target, db_file, sample_id, meta_time_out, i),
+                callback=update,
+            )
+  
     pool.close()
     pool.join()
     # pbar.close()

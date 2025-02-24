@@ -591,7 +591,7 @@ if __name__ == '__main__':
         train_ds = Dataset.from_generator(train_dataset.__iter__)
         dev_ds = Dataset.from_generator(dev_dataset.__iter__)
         
-        exp_name = f'{base_model_name.split("/")[-1]}-q_ba'
+        exp_name = f'{base_model_name.split("/")[-1]}-{args.ds}-q_ba'
 
         args = SentenceTransformerTrainingArguments(
             output_dir=f'models/{args.ds}/{exp_name}',
@@ -656,7 +656,7 @@ if __name__ == '__main__':
         base_model_name = 'cross-encoder/ms-marco-MiniLM-L-6-v2'
         model = CrossEncoder(base_model_name, num_labels=1)
 
-        exp_name = f'{base_model_name.split("/")[-1]}-q_ba-rerank'
+        exp_name = f'{base_model_name.split("/")[-1]}-{args.ds}-q_ba-rerank'
 
         train_samples = train_dataset.get_rerank_samples()
         train_loader = DataLoader(

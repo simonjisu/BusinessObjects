@@ -52,7 +52,7 @@ from src.eval_utils import (
     run_sqls_parallel,
     get_all_structural_score,
     get_all_semantic_score,
-    run_sqls,
+    # run_sqls,
     SKIP_DB_IDS
 )
 
@@ -761,18 +761,18 @@ def evaluate_exec(
     batches = list(batched(range(n_samples), n_batch))
     for batch_i, idxes in enumerate(batches):
         logging.info(f"Processing execution - batch {batch_i+1}/{len(batches)}")
-        if (eval_path / f'temp_exec-{batch_i}.json').exists():
+        if (eval_path / f'{prefix}temp_exec-{batch_i}.json').exists():
             continue
         batch_results = []
         batch_eval_data = {k: [v[i] for i in idxes] for k, v in eval_data.items()}
         batch_preds = [x for x in batch_eval_data['pred_queries']]
         batch_sample_ids = [x for x in batch_eval_data['sample_ids']]
 
-        if num_cpus == 1:
-            batch_exec_result = run_sqls(batch_eval_data, meta_time_out=meta_time_out)
-        else:
-            batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
-        
+        # if num_cpus == 1:
+        #     batch_exec_result = run_sqls(batch_eval_data, meta_time_out=meta_time_out)
+        # else:
+        #     batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
+        batch_exec_result = run_sqls_parallel(batch_eval_data, num_cpus=num_cpus, meta_time_out=meta_time_out)
         # assert len(batch_exec_result) == len(batch_sample_ids), f"Length of exec_result({len(batch_exec_result)}) and eval_data({len(batch_sample_ids)}) should be the same"
         logging.info(f"Batch {batch_i+1} - Done execution")
         for j, (sample_id, pred_sql) in enumerate(zip(batch_sample_ids, batch_preds)):
@@ -793,6 +793,7 @@ def evaluate_exec(
 
         with open(eval_path / f'{prefix}temp_exec-{batch_i}.json', 'w') as f:
             json.dump(batch_results, f, indent=4)
+        
 
     final_results = []
     for i in range(len(batches)):
@@ -840,7 +841,7 @@ def evaluate_merit(
     batches = list(batched(range(n_samples), n_batch))
     for batch_i, idxes in enumerate(batches):
         logging.info(f"Processing merit - batch {batch_i+1}/{len(batches)}")
-        if (eval_path / f'temp_merit-{batch_i}.json').exists():
+        if (eval_path / f'{prefix}temp_merit-{batch_i}.json').exists():
             continue
         batch_keys = []
         batch_target_parsed = []
@@ -1007,7 +1008,9 @@ if __name__ == '__main__':
             n_retrieval=args.n_retrieval,
             use_reranker=args.use_reranker,
             is_question_query=args.is_question_query,
-            is_test=False if args.type == 'dev' else True
+            is_test=False if args.type == 'dev' else True,
+            custom_retriever_model_name=f'./models/msmarco-MiniLM-L6-cos-v5-{args.ds}-q_ba',
+            custom_reranker_model_name=f'./models/ms-marco-MiniLM-L-6-v2-{args.ds}-q_ba-rerank'
         )
 
         # sample bos to evaluate
@@ -1178,6 +1181,8 @@ if __name__ == '__main__':
         # file_name = f'{file_p1}-{file_p2}.json'
 
         def _format_column_value(string: str):
+            if not isinstance(string, str):
+                string = str(string)
             operations = [
                 '>', '<', '=', '>=', '<=', '!=', '<>'
             ]

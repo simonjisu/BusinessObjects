@@ -34,8 +34,8 @@ BIRD / Spider
     * test-with_bos:
         * 0_retrieve: Yes /
         * 1_gen_sql: Yes /
-        * 2_evaluate: 
-        * 3_aggregate: 
+        * 2_evaluate: Yes /
+        * 3_aggregate: Yes / 
 * pipeline inference
     * dev-no_bos:
         * 1_gen_templates: Yes / 
@@ -50,21 +50,21 @@ BIRD / Spider
         * 2_keyword_extraction: Yes /
         * 3_search_value: Yes /
         * 4_fill_in: Yes / 
-        * 5_evaluate: Yes / --> 문제 있음 다시 돌리는중
-        * 6_aggregate: 
-        * 7_valid_bo: 
+        * 5_evaluate: Yes / 
+        * 6_aggregate: Yes / 
+        * 7_valid_bo: Yes / 
     * test-no_bos:
         * 1_gen_templates: Yes / 
         * 2_keyword_extraction: Yes / 
         * 3_search_value: Yes / 
         * 4_fill_in: Yes / 
-        * 5_evaluate: 
-        * 6_aggregate: 
+        * 5_evaluate: Yes / 
+        * 6_aggregate: Yes / 
     * test-with_bos:
-        * 0_retrieve: 
-        * 1_gen_templates: 
-        * 2_keyword_extraction: 
-        * 3_search_value: 
+        * 0_retrieve: Yes / 
+        * 1_gen_templates: Yes / 
+        * 2_keyword_extraction: Yes / 
+        * 3_search_value: Yes / 
         * 4_fill_in: 
         * 5_evaluate: 
         * 6_aggregate: 

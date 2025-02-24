@@ -153,7 +153,9 @@ Your output should be of the following JSON format:
     "rationale": "<list[str]: the step-by-step reasoning for the extraction>",
     "extraction": "<dict[str, list[str]]: keys for the dictionary are column names and values are list of keywords, keyphrases, and named entities extracted from the question, hint and sql template>",
 }}
-Make sure the keyphrases and entities are string types in the extraction list.
+Make sure the keyphrases and entities are string types in the extraction list. 
+The key of the `extraction` dictionary should not be empty like `""`.
+If values in `extraction` dictionary is empty, please leave it as an empty list `[]`, not a empty string `""`.
 
 <INPUT QUERY>: {input_query}
 <EVIDENCE>: {evidence}
