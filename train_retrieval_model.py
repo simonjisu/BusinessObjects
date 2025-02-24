@@ -525,6 +525,7 @@ if __name__ == '__main__':
     parser.add_argument('--task', type=str, default='retrieval', 
                         help='`retrieval`, `data_prep`')
     parser.add_argument('--ds', type=str, default='bird', help='Dataset to use for training. spider or bird') 
+    parser.add_argument('--exp_name', type=str, default='experiments', help='Folder to store the experiments')
     parser.add_argument('--num_cpus', type=int, default=1, help='Number of cpus to use for parallel processing')
     parser.add_argument('--num_train_epochs', type=int, default=3, help='Number of training epochs')
     parser.add_argument('--learning_rate', type=float, default=2e-5, help='Learning rate')
@@ -546,7 +547,7 @@ if __name__ == '__main__':
     proj_path = Path('.').resolve()
     description_file = f'description.json' if args.ds == 'spider' else f'{args.ds}_description.json'
 
-    experiment_folder = proj_path / 'experiments' / args.ds
+    experiment_folder = proj_path / args.exp_name / args.ds
 
     # eval_path = experiment_folder / 'evals' / args.task
     prediction_path = experiment_folder / 'predictions' / args.task
