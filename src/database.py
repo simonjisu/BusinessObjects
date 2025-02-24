@@ -885,7 +885,7 @@ if __name__ == "__main__":
                 current_completed += 1
                 logging.info(f"Progress: {current_completed}/{total_completed}")
         else:
-            with mp.Pool(args.num_workers) as pool: 
+            with mp.Pool(args.num_workers, maxtasksperchild=1) as pool: 
                 for db_id, db_file in db_paths.items():
                     if db_id in skip:
                         logging.info(f"Skipping {db_id}")
