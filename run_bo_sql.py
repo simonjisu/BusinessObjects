@@ -1163,10 +1163,11 @@ if __name__ == '__main__':
                 x = {
                     'sample_id': sample_id,
                     'question': sample.final.question,
-                    'evidence': sample.evidence,
                     'db_id': sample.db_id,
                     'sql_template': sql_template,
                 }
+                if args.ds == 'bird':
+                    x['evidence'] = sample.evidence
                 input_samples.append(x)
                 template_sample_id2doc_ids[key].update(doc_ids)
 
