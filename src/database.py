@@ -383,9 +383,12 @@ class Database:
                 
                 if ("name" in column.lower() and sum_of_lengths < 5000000) or (sum_of_lengths < 2000000 and average_length < 25):
                     # print(f"Fetching distinct values for {column}")
-                    values = [str(value[0]) for value in self.execute(
-                        f"SELECT DISTINCT `{column}` FROM `{table_name}` WHERE `{column}` IS NOT NULL", rt_pandas=False)]
-                    
+                    try:
+                        values = [str(value[0]) for value in self.execute(
+                            f"SELECT DISTINCT `{column}` FROM `{table_name}` WHERE `{column}` IS NOT NULL", rt_pandas=False)]
+                    except Exception as e:
+                        logging.error(f"Error fetching distinct values for {column} in {table_name}: {e}")
+                        values = []           
                     # print(f"Number of different values: {len(values)}")
                     table_values[column] = values
             unique_values[table_name] = table_values
