@@ -338,6 +338,10 @@ def task_retrieve(
             all_results.extend(temp)
         json.dump(all_results, file, indent=4)
 
+    # remove temp_files
+    for p in prediction_path.glob(f'{prefix}*.json'):
+        p.unlink()
+
 def task_gen_template(
         samples: list[SpiderSample|BirdSample],
         tables: dict[str, DatabaseModel],
@@ -356,11 +360,10 @@ def task_gen_template(
         # doc_ids could be empty
         if not doc_ids:
             return 'No Hints'
-        for doc_id in doc_ids:
-            docs = [{
-                'descrption': id2bo[doc_id]['ba'], 
-                'virtual_table': id2bo[doc_id]['vt']
-            } for doc_id in doc_ids]
+        docs = [{
+            'descrption': id2bo[doc_id]['ba'], 
+            'virtual_table': id2bo[doc_id]['vt']
+        } for doc_id in doc_ids]
         
         hint = '\nDescriptions and Virtual Tables:\n'
         hint += json.dumps({j: doc for j, doc in enumerate(docs)}, indent=4)
@@ -463,6 +466,13 @@ def task_gen_template(
             all_results.extend(temp)
         json.dump(all_results, file, indent=4)
 
+    # remove temp_files
+    for p in prediction_path.glob(f'{prefix}*.json'):
+        p.unlink()
+
+    for p in Path(f"./cache").glob(f"{prefix}{prediction_path.stem}_*.db"):
+        p.unlink()
+
 def task_keyword_extraction(
         input_samples: list[dict[str, str|int]],
         template_sample_id2doc_ids: dict[int, set[int]],  # mapping back by combining `sample_id` and `doc_ids`
@@ -558,6 +568,13 @@ def task_keyword_extraction(
             all_results.extend(temp)
         json.dump(all_results, file, indent=4)
 
+    # remove temp_files
+    for p in prediction_path.glob(f'{prefix}*.json'):
+        p.unlink()
+
+    for p in Path(f"./cache").glob(f"{prefix}{prediction_path.stem}_*.db"):
+        p.unlink()
+
 def task_search_value(
         input_samples: list[dict[str, str|int]],
         keyword_sample_id2doc_ids: dict[tuple[str, int], set[int]],
@@ -648,7 +665,11 @@ def task_search_value(
                 temp = json.load(f)
             all_results.extend(temp)
         json.dump(all_results, file, indent=4)
-        
+
+    # remove temp_files
+    for p in prediction_path.glob(f'{prefix}*.json'):
+        p.unlink()
+
 def task_fill_in(
         input_samples: list[dict[str, str|int]],
         template_values_sample_id2doc_ids: dict[tuple[str, int], set[int]],
@@ -748,6 +769,13 @@ def task_fill_in(
                 temp = json.load(f)
             all_results.extend(temp)
         json.dump(all_results, file, indent=4)
+
+    # remove temp_files
+    for p in prediction_path.glob(f'{prefix}*.json'):
+        p.unlink()
+
+    for p in Path(f"./cache").glob(f"{prefix}{prediction_path.stem}_*.db"):
+        p.unlink()
 
 def evaluate_exec(
         eval_data: dict,
