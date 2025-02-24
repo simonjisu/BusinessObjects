@@ -271,18 +271,20 @@ def task_retrieve(
         n_retrieval: int = 1,
         use_reranker: bool = False,
         is_question_query: bool = False,
-        is_test: bool = False
+        is_test: bool = False,
+        custom_retriever_model_name: str='',
+        custom_reranker_model_name: str=''
     ):
     if embedding_model == 'openai':
         embedder = OpenAIEmbeddings()
     elif embedding_model == 'custom':
-        embedder = HuggingFaceEmbeddings(model_name='./models/msmarco-MiniLM-L6-cos-v5-q_ba')
+        embedder = HuggingFaceEmbeddings(model_name=custom_retriever_model_name)
     else:
         raise KeyError('Invalid embedding model for `embedding_model`, either `openai` or `custom`')
     if reranker_model == 'msmarco':
         cross_encoder = HuggingFaceCrossEncoder(model_name='cross-encoder/ms-marco-MiniLM-L-6-v2')
     elif reranker_model == 'custom':
-        cross_encoder = HuggingFaceCrossEncoder(model_name='./models/ms-marco-MiniLM-L-6-v2-q_ba-rerank')
+        cross_encoder = HuggingFaceCrossEncoder(model_name=custom_reranker_model_name)
     else:
         raise KeyError('Invalid embedding model for `reranker_model`, either `msmarco` or `custom`')
     
