@@ -78,7 +78,84 @@ Your output should be of the following JSON format:
 <INPUT QUERY>: {input_query}
 <OUTPUT>: 
 '''
-    keyword_extraction = '''
+    keyword_extraction_spider = '''
+### Objective 
+Analyze the given input query(a natural language question) and a sql template to identify and extract keywords, keyphrases, and named entities for each column. 
+These elements are crucial for understanding the core components of the inquiry and the guidance provided. This process involves recognizing and isolating significant terms and phrases that could be instrumental in formulating searches or queries related to the posed question.
+
+### Instructions
+Read the input query carefully: Understand the primary focus and specific details of the question. Look for any named entities (such as organizations, locations, etc.), technical terms, and other phrases that encapsulate important aspects of the inquiry.
+
+### SQL query template
+All the values in the SQL query should be replaced with the following placeholders:
+- `[PLACEHOLDER-TYPE:STRING]` for string values
+- `[PLACEHOLDER-TYPE:NUMERIC]` for numeric values
+
+### Keyphrases and Entities
+Combine your findings from both the question and sql template for columns that need a value to fill in the placeholder. 
+This list should contain:
+- Keywords: Single words that capture essential aspects of the question.
+- Keyphrases: Short phrases or named entities that represent specific concepts, locations, organizations, or other significant details.
+- Ensure to maintain the original phrasing or terminology used in the question.
+
+### Example 1
+<INPUT QUERY>: "What is the annual revenue of Acme Corp in the United States for 2022?"
+<SQL TEMPLATE>: "SELECT annual_revenue FROM financial_reports WHERE company_name = [PLACEHOLDER-TYPE:STRING] AND country = [PLACEHOLDER-TYPE:STRING] AND fiscal_year = [PLACEHOLDER-TYPE:NUMERIC];"
+<OUTPUT>:
+{{
+    "extraction": {{
+        "company_name": ["Acme Corp", "Acme Corporation", "Acme", "A.C."],
+        "country": ["United States", "U.S."],
+        "fiscal_year": ["2022"]
+    }}
+}}
+
+### Example 2
+<INPUT QUERY>: "In the Winter and Summer Olympics of 1988, which game has the most number of competitors? Find the difference of the number of competitors between the two games."
+<SQL TEMPLATE>: "SELECT games_name, COUNT(person_id) AS num_competitors FROM olympics_participation WHERE games_year = [PLACEHOLDER-TYPE:NUMERIC] AND games_season IN ([PLACEHOLDER-TYPE:STRING], [PLACEHOLDER-TYPE:STRING]) GROUP BY games_name ORDER BY num_competitors DESC LIMIT 1;"
+<OUTPUT>:
+{{
+    "extraction": {{
+        "games_year": ["1988"],
+        "games_season": ["1988 Winter", "1988 Summer"]
+    }}
+}}
+
+### Example 3
+<INPUT QUERY>: "How many Men's 200 Metres Freestyle events did Ian James Thorpe compete in?"
+<SQL TEMPLATE>: "SELECT COUNT(event_id) FROM athlete_participation WHERE athlete_name = [PLACEHOLDER-TYPE:STRING] AND event_name = [PLACEHOLDER-TYPE:STRING];"
+<OUTPUT>:
+{{
+    "extraction": {{
+        "athlete_name": ["Ian James Thorpe"],
+        "event_name": ["Men's 200 Metres Freestyle", "Swimming Men's 200 metres Freestyle"],
+    }}
+}}
+
+### TASK
+Given the following question and schema, identify and list all relevant keywords, keyphrases, and named entities for columns that need a value to fill in the placeholder.
+Remember, the keyphrases and entities can only be values to be fill into the sql template. Do not include any functions, operators, or other SQL syntax.
+Please provide your findings as `FORMATTING` instructions, capturing the essence of both the question and evidence through the identified terms and phrases. 
+
+### SCHEMA
+You are working with the following schema in a SQLite Database:
+{schema}
+
+### FORMATTING
+Your output should be of the following JSON format:
+{{
+    "rationale": "<list[str]: the step-by-step reasoning for the extraction>",
+    "extraction": "<dict[str, list[str]]: keys for the dictionary are column names and values are list of keywords, keyphrases, and named entities extracted from the question, hint and sql template>",
+}}
+Make sure the keyphrases and entities are string types in the extraction list. 
+The key of the `extraction` dictionary should not be empty like `""`.
+If values in `extraction` dictionary is empty, please leave it as an empty list `[]`, not a empty string `""`.
+
+<INPUT QUERY>: {input_query}
+<SQL TEMPLATE>: {sql_template}
+<OUTPUT>: 
+'''
+    keyword_extraction_bird = '''
 ### Objective 
 Analyze the given input query(a natural language question), a evidence and a sql template to identify and extract keywords, keyphrases, and named entities for each column. 
 These elements are crucial for understanding the core components of the inquiry and the guidance provided. This process involves recognizing and isolating significant terms and phrases that could be instrumental in formulating searches or queries related to the posed question.

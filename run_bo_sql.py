@@ -495,9 +495,10 @@ def task_keyword_extraction(
             x = {
                 'sample_id': sample['sample_id'],
                 'question': sample['question'],
-                'evidence': sample['evidence'],
                 'sql_template': sample['sql_template'],
             }
+            if sample.get('evidence'):
+                x['evidence'] = sample['evidence']
             samples_by_db_id[db_id].append(x)
 
     for db_id, samples in samples_by_db_id.items():
@@ -518,9 +519,10 @@ def task_keyword_extraction(
                     input_data = {
                         'schema': schema_str,
                         'input_query': sample['question'],
-                        'evidence': sample['evidence'],
                         'sql_template': sample['sql_template'] 
                     }
+                    if sample.get('evidence'):
+                        input_data['evidence'] = sample['evidence']
                     batch_inputs.append(input_data)
                     batch_iidx2oidx[iidx] = len(batch_inputs) - 1
             
@@ -1182,10 +1184,16 @@ if __name__ == '__main__':
         
         del samples_by_id, templates # free memory
 
-        prompt = PromptTemplate(
-            template=Prompts.keyword_extraction,
-            input_variables=['schema', 'input_query', 'evidence', 'sql_template'],
-        )
+        if args.ds == 'bird':
+            prompt = PromptTemplate(
+                template=Prompts.keyword_extraction_bird,
+                input_variables=['schema', 'input_query', 'evidence', 'sql_template'],
+            )
+        else:
+            prompt = PromptTemplate(
+                template=Prompts.keyword_extraction_spider,
+                input_variables=['schema', 'input_query', 'sql_template'],
+            )
         model_openai = ChatOpenAI(
             model='gpt-4o-mini',
             temperature=0.5,
