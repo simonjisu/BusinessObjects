@@ -4,4 +4,5 @@ uv run run_bo_sql.py \
     --type dev \
     --task fill_in \
     --exp_name pipeline_exp \
-    --prefix "x-dev-no_bos-"
+    --with_bos \
+    --prefix "x-dev-with_bos-"

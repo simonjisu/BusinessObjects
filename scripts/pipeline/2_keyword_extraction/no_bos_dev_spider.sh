@@ -2,6 +2,6 @@
 uv run run_bo_sql.py \
     --ds spider \
     --type dev \
-    --task fill_in \
+    --task keyword_extraction \
     --exp_name pipeline_exp \
     --prefix "x-dev-no_bos-"

@@ -1,7 +1,8 @@
 #!/bin/bash
 uv run run_bo_sql.py \
     --ds spider \
-    --type dev \
-    --task fill_in \
+    --type test \
+    --task aggregate \
     --exp_name pipeline_exp \
-    --prefix "x-dev-no_bos-"
+    --eval_target fill_in \
+    --with_bos

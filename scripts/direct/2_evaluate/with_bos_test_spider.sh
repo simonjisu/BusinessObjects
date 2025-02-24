@@ -1,6 +1,6 @@
 #!/bin/bash
 uv run run_bo_sql.py \
-    --ds bird \
+    --ds spider \
     --type test \
     --task evaluate \
     --exp_name direct_exp \

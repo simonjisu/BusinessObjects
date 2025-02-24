@@ -4,10 +4,10 @@ uv run run_bo_sql.py \
     --type dev \
     --task retrieve \
     --exp_name direct_exp \
-    --description_file description.json \
-    --k_retrieval 5 \
-    --n_retrieval 1 \
+    --k_retrieval 10 \
+    --n_retrieval 3 \
     --use_reranker \
     --embedding_model custom \
     --reranker_model custom \
-    --with_bos
+    --with_bos \
+    --prefix "x-dev-"

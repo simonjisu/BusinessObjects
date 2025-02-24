@@ -9,4 +9,5 @@ uv run run_bo_sql.py \
     --use_reranker \
     --embedding_model custom \
     --reranker_model custom \
-    --with_bos
+    --with_bos \
+    --prefix "x-dev-"
