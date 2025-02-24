@@ -65,7 +65,7 @@ BIRD / Spider
         * 1_gen_templates: Yes / 
         * 2_keyword_extraction: Yes / 
         * 3_search_value: Yes / 
-        * 4_fill_in: 
-        * 5_evaluate: 
-        * 6_aggregate: 
+        * 4_fill_in: Yes / 
+        * 5_evaluate: Yes / 
+        * 6_aggregate: Yes / 
 ```

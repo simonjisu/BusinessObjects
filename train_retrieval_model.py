@@ -568,7 +568,7 @@ if __name__ == '__main__':
 
     elif args.task == 'retrieval':
         with open(experiment_folder / 'predictions' / 'create_bo' / f'data_retrieval_rerank.json', 'r') as f:
-                data = json.load(f)
+            data = json.load(f)
         
         train_dataset = BADataset(data=data['train'], bert_scores=data['bert_scores'], 
                                   task=args.task, n_neg=2, threshold=0.3)
