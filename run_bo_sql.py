@@ -58,7 +58,7 @@ from src.eval_utils import (
 
 _ = load_dotenv(find_dotenv())
 
-from typing import Iterator, Generator, Any
+from typing import Any
 from itertools import product, islice
 
 def batched(iterable, n, *, strict=False):
@@ -70,42 +70,6 @@ def batched(iterable, n, *, strict=False):
         if strict and len(batch) != n:
             raise ValueError('batched(): incomplete batch')
         yield batch
-
-class Sampler():
-    def __init__(self, bos: dict[str, list[dict]]):
-        self.bos = bos
-        self.df = _get_df_from_bos(bos)
-
-    def _get_sample_batch(self, db_id: str, n_sample: int=1, n_stop: int=20, seed: int=42):
-        np.random.seed(seed)
-        sampled = []
-        sample_batch = []
-        n_sampled = 0
-        df_db_id = self.df.loc[(self.df['db_id'] == db_id) & ~self.df['sample_id'].isin(sampled)]
-        while df_db_id['category'].nunique() > 0 and n_sampled < n_stop:
-            groupby_statement = df_db_id.groupby('category')['sample_id']
-            sample_ids = groupby_statement.apply(lambda x: x.sample(min(len(x), n_sample))).tolist()
-            if n_sampled + len(sample_ids) > n_stop:
-                sample_ids = sample_ids[:(n_stop - n_sampled)]
-            sampled.extend(sample_ids)
-            sample_batch.append(sample_ids)
-            n_sampled += len(sample_ids)
-            df_db_id = self.df.loc[(self.df['db_id'] == db_id) & ~self.df['sample_id'].isin(sampled)]
-
-        return sample_batch
-    
-    def sample(self, db_id: str, n_sample: int=1, n_stop: int=20, seed: int=42, rt_idx: bool=False) -> Iterator:
-        sample_batch = self._get_sample_batch(db_id, n_sample, n_stop, seed)
-        if rt_idx:
-            for sample_ids in sample_batch:
-                yield sample_ids
-        else:
-            for sample_ids in sample_batch:
-                s = self.df.loc[(self.df['db_id'] == db_id) & self.df['sample_id'].isin(sample_ids)]
-                s = s.to_dict(orient='records')
-                for x in s:
-                    x['category'] = str(x['category'])
-                yield s
 
 def _format_interval(x: pd.Interval):
     return pd.Interval(
@@ -120,30 +84,6 @@ def _get_categories(s: pd.Series):
     else:
         tiles = [0, 0.2, 0.4, 0.6, 0.8, 1]
         return pd.qcut(s, q=tiles, duplicates='drop')
-
-def _get_categories_with_same_name(s: pd.Series):
-    if s.nunique() == 1:
-        s = pd.qcut(s, q=[0, 1], duplicates='drop')
-        s = s.map({s.cat.categories[i]: str(i) for i in range(len(s.cat.categories))})
-        return s
-    else:
-        tiles = [0, 0.2, 0.4, 0.6, 0.8, 1]
-        s = pd.qcut(s, q=tiles, duplicates='drop')
-        s = s.map({s.cat.categories[i]: str(i) for i in range(len(s.cat.categories))})
-        return s
-
-def _get_df_from_bos(bos):
-    df = []
-    for db_id, bs in bos.items():
-        for b in bs:
-            res = {'db_id': db_id}
-            res.update(b)
-            df.append(res)
-    df = pd.DataFrame(df)
-    df_cates = df.groupby('db_id')['gold_complexity'].apply(_get_categories)
-    df_cates = df_cates.rename('category').apply(_format_interval)
-    df = df.merge(df_cates.reset_index('db_id', drop=True), left_index=True, right_index=True)
-    return df
 
 def create_vt_ba(
         samples: list[SpiderSample|BirdSample], 
@@ -840,26 +780,6 @@ def evaluate_exec(
     for i in range(len(batches)):
         (eval_path / f'{prefix}temp_exec-{i}.json').unlink()
 
-    # assert len(exec_result) == len(eval_data['sample_ids']), f"Length of exec_result({len(exec_result)}) and eval_data({len(eval_data['sample_ids'])}) should be the same"
-    # final_results = []
-    # for i in range(len(eval_data['sample_ids'])):
-    #     sample_id = eval_data['sample_ids'][i]
-    #     pred_sql = eval_data['pred_queries'][i]
-    #     key = hashlib.sha256(f'{sample_id}-{pred_sql}'.encode()).hexdigest()
-    #     doc_ids = eval_data2doc_ids.get(key)
-    #     result = exec_result[i]  # result: sample_id, res, target_error
-    #     if doc_ids: 
-    #         for doc_id in doc_ids:
-    #             new_res = deepcopy(result)
-    #             new_res['doc_ids'] = [doc_id]
-    #             final_results.append(new_res)
-    #     else:
-    #         result['doc_ids'] = []
-    #         final_results.append(result)
-
-    # with open(eval_file, 'w') as f:
-    #     json.dump(final_results, f, indent=4)
-
 def evaluate_merit(
         eval_data: dict,
         eval_data2doc_ids: dict[str, set[int]],  # key(sample_id+pred_sql): {doc_id}
@@ -1266,7 +1186,8 @@ if __name__ == '__main__':
             for output_column_name, kws in output_kws.items():
                 if kws:  # only store non-empty keywords
                     if ('.' in output_column_name): # rewrite the column_name
-                        _, column_name = output_column_name.split('.')
+                        *_, column_name = output_column_name.split('.')
+                        column_name = column_name.strip().rstrip(')')
                     else:
                         column_name = output_column_name
                     all_kws[column_name] = [_format_column_value(kw) for kw in kws if kw]
@@ -1703,146 +1624,28 @@ if __name__ == '__main__':
             json.dump(test_bos, f, indent=4)
 
         print('BOs selected for test set saved to:', experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_test_bo.json')
-    # elif args.task == 'valid_bo_prepare_batch_run':
-    #     samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-    #     df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'bird_dev.csv')
-    #     df_score = df.loc[:, ['sample_id', 'db_id', 'exec_result']]
-    #     df_error = df_score.loc[df_score['exec_result'] == 0, ['db_id', 'sample_id']]
-    #     error_ids = df_error['sample_id'].tolist()
-    #     samples = list(filter(lambda x: x.sample_id in error_ids, samples))
-        
-    #     with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
-    #         partial_db_ids = json.load(f)
-        
-    #     bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-    #     assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
-    #     with bo_path.open() as f:
-    #         bos = json.load(f)
+    
+    elif args.task == 'test_bo':
+        eval_path = experiment_folder / 'evals'
+        no_bos_path = eval_path / f'result-no_bos-{args.type}.csv'
+        with_bos_path = eval_path / f'result-with_bos-{args.type}.csv'
+        assert no_bos_path.exists(), f'Run with the `task=evaluate, type={args.type}` first'
+        assert with_bos_path.exists(), f'Run with the `task=evaluate, type={args.type}` first'
 
-    #     bos = remove_duplicate_bos(bos)
-
-    #     with open(experiment_folder / f'partial_{args.ds}_db_ids.json', 'w') as f:
-    #         json.dump(partial_db_ids, f, indent=4)
-        
-    #     sampler = Sampler(bos)
-        
-    #     sampled_bos = {}
-    #     for db_id_group in partial_db_ids:
-    #         sampled_bos[str(db_id_group)] = defaultdict()
-    #         for db_id in partial_db_ids[str(db_id_group)]:
-    #             x_samples = list(filter(lambda x: x.db_id == db_id, samples))
-    #             for idx_bos, train_bos in enumerate(sampler.sample(db_id, args.n_sample, args.n_stop, rt_idx=False)):
-    #                 # print(f'{db_id}-{idx_bos} :', f'{len(train_bos)}', f'{len(list(product(train_bos, x_samples)))}')
-    #                 sampled_bos[str(db_id_group)][f'{db_id}-{idx_bos}'] = {
-    #                     'train_bos': train_bos,
-    #                     'n_iter': len(list(product(train_bos, x_samples))), 
-    #                     'total_bos_in_batch': len(train_bos),
-    #                     'total_samples_in_batch': len(x_samples)
-    #                 }
-
-    #     with (experiment_folder / f'partial_{args.ds}_batch.json').open('w') as f:
-    #         json.dump(sampled_bos, f, indent=4)
-
-    # elif args.task == 'valid_bo':
-    #     # use error sample to validate
-    #     samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-    #     df = pd.read_csv(experiment_folder / 'evals' / 'zero_shot' / f'{args.ds}_dev.csv')
-    #     df_error = df.loc[df['exec_result'] == 0]
-    #     error_ids = df_error['sample_id'].tolist()
-    #     samples = list(filter(lambda x: x.sample_id in error_ids, samples))
-
-    #     bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-    #     assert bo_path.exists(), 'Run with the `task=create_bo, type=train` first'
-    #     with bo_path.open() as f:
-    #         bos = json.load(f)
-    #     bos = remove_duplicate_bos(bos)
-
-    #     batch_file_path = experiment_folder / f'partial_{args.ds}_batch.json'
-    #     # assert batch_file_path.exists(), 'Run with the `task=create_bo, type=train` first'
-    #     if (args.db_id_group >= 0) and batch_file_path.exists():
-    #         with batch_file_path.open() as f:
-    #             sampled_bos = json.load(f)[str(args.db_id_group)]  
-    #         # dict["db_id-idx_bo", dict["train_bos", "n_iter", "total_bos_in_batch", "total_samples_in_batch"]]
-    #     else:
-    #         raise KeyError('Run with the `task=valid_bo_prepare_batch_run` first')
-        
-    #     # filter samples with db_ids gorup
-    #     with open(experiment_folder / f'partial_{args.ds}_db_ids.json') as f:
-    #         partial_db_ids = json.load(f)
-    #     samples = list(filter(lambda x: x.db_id in partial_db_ids[str(args.db_id_group)], samples))
-    #     print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
-        
-    #     prompt = PromptTemplate(
-    #         template=Prompts.zero_shot_hints_inference,
-    #         input_variables=['schema', 'input_query', 'hint'],
-    #     )
-
-    #     model = model_openai.with_structured_output(SQLResponse, method='json_mode')
-    #     chain = (prompt | model)
-
-    #     valid_bo(
-    #         samples=samples, 
-    #         tables=tables, 
-    #         bos=sampled_bos, 
-    #         chain=chain,
-    #         prediction_path=prediction_path, 
-    #         file_name=f'{args.ds}_{args.type}', 
-    #         split_k=2,
-    #     )
-
-    # elif args.task == 'zero_shot_hint':
-    #     bo_path = experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_train_bo.json'
-    #     with bo_path.open() as f:
-    #         all_bos = json.load(f)
-
-    #     # test_scenarios
-    #     with (experiment_folder / 'test_scenarios.json').open('r') as f:
-    #             test_scenarios = json.load(f)
-            
-    #     sce = {0: "10", 1: "15", 2: "25", 3: "25"}[args.scenario]
-    #     test_bo_ids = test_scenarios[sce]
-    #     test_bos = defaultdict(list)
-    #     for db_id, bos in all_bos.items():
-    #         if db_id in test_bo_ids:
-    #             bo_ids = test_bo_ids[db_id]
-    #             test_bos[db_id].extend(list(filter(lambda x: x['sample_id'] in bo_ids, bos)))
-        
-    #     # (bo-query)
-    #     if args.scenario in (0, 1, 2):
-    #         is_question_query = False
-    #         print('bo-query scenario')
-    #     # (question-query)
-    #     elif args.scenario in (3,):
-    #         is_question_query = True
-    #         print('question-query scenario')
-    #     else:
-    #         print(f'Invalid scenario: {args.scenario}')
-    #         raise ValueError('Invalid scenario')
-        
-    #     # args.type == test
-    #     samples = load_samples_spider_bird(proj_path / 'data' / f'{args.ds}_{args.type}.json')
-    #     samples = [x for x in samples if x.db_id in test_bo_ids]
-    #     print(f'{args.ds}-{args.type} samples loaded: {len(samples)}')
-        
-    #     prompt = PromptTemplate(
-    #         template=Prompts.zero_shot_hints_inference,
-    #         input_variables=['schema', 'input_query', 'hint'],
-    #     )
-
-    #     model = model_openai.with_structured_output(SQLResponse, method='json_mode')
-    #     chain = (prompt | model)
-
-    #     predict_sql_bo(
-    #         samples=samples, 
-    #         tables=tables, 
-    #         test_bos=test_bos, 
-    #         chain=chain,
-    #         prediction_path=prediction_path, 
-    #         file_name=f'{args.ds}_{args.type}_{args.scenario}', 
-    #         split_k=3,
-    #         k_retrieval=args.k_retrieval,
-    #         n_retrieval=args.n_retrieval,
-    #         score_threshold=args.score_threshold,
-    #         use_reranker=args.use_reranker,
-    #         is_question_query=is_question_query
-    #     )
+        df_no_bos = pd.read_csv(no_bos_path)
+        df_no_bos.drop(columns=['retrieved'], inplace=True)
+        df_with_bos = pd.read_csv(with_bos_path)
+        df = pd.merge(
+            left=df_with_bos,
+            right=df_no_bos,
+            how='inner',
+            on=['db_id', 'sample_id'],
+            suffixes=('_bo', '')
+        )
+        df['retrieved'] = ~df['retrieved'].isnull()
+        df['cates_'] = pd.qcut(df['target_complexity'], q=5)
+        df['cates'] = df['cates_'].apply(
+            lambda x: f'{int(round(x.left, 0))}-{int(round(x.right, 0))}'
+        )
+        df.to_csv(eval_path / f'{args.exp_name}.csv', index=False)
+        print('Results saved to:', eval_path / f'{args.exp_name}.csv')
