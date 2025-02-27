@@ -324,7 +324,7 @@ def task_gen_template(
         for sample in retrieved:
             db_id = sample['db_id']
             sample_id = sample['sample_id']
-            retrieved_by_db_id[db_id][sample_id] = sample['retrieved']
+            retrieved_by_db_id[db_id][sample_id] = sample['retrieved'] 
 
     samples_by_db_id = defaultdict(list)
     for sample in samples:
@@ -341,7 +341,7 @@ def task_gen_template(
             # one-to-one mapping in BOs
             id2bo = {}
             retrieved_bos = bos.get(db_id, [])
-            for x in retrieved_bos:
+            for x in retrieved_bos:  # bo_id: bo
                 id2bo[x['sample_id']] = x
 
         results = []
@@ -461,8 +461,7 @@ def task_keyword_extraction(
                         'input_query': sample['question'],
                         'sql_template': sample['sql_template'] 
                     }
-                    if sample.get('evidence'):
-                        input_data['evidence'] = sample['evidence']
+                    input_data['evidence'] = sample.get('evidence', '')
                     batch_inputs.append(input_data)
                     batch_iidx2oidx[iidx] = len(batch_inputs) - 1
             
@@ -1626,6 +1625,7 @@ if __name__ == '__main__':
         print('BOs selected for test set saved to:', experiment_folder / 'predictions' / 'create_bo' / f'final_{args.ds}_test_bo.json')
     
     elif args.task == 'test_bo':
+        # uv run run_bo_sql.py --task test_bo --type test --ds spider/bird --exp_name direct_exp/pipeline_exp
         eval_path = experiment_folder / 'evals'
         no_bos_path = eval_path / f'result-no_bos-{args.type}.csv'
         with_bos_path = eval_path / f'result-with_bos-{args.type}.csv'
@@ -1642,7 +1642,9 @@ if __name__ == '__main__':
             on=['db_id', 'sample_id'],
             suffixes=('_bo', '')
         )
-        df['retrieved'] = ~df['retrieved'].isnull()
+        df.loc[df['retrieved'].isnull(), 'retrieved'] = -1
+        df['retrieved'] = df['retrieved'].astype(np.int64)
+        # df['retrieved'] = ~df['retrieved'].isnull()
         df['cates_'] = pd.qcut(df['target_complexity'], q=5)
         df['cates'] = df['cates_'].apply(
             lambda x: f'{int(round(x.left, 0))}-{int(round(x.right, 0))}'
