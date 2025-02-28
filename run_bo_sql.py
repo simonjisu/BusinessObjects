@@ -1,4 +1,5 @@
 import json
+import re
 import numpy as np
 import pandas as pd
 import argparse
@@ -45,7 +46,9 @@ from src.db_utils import get_schema_str, get_db_file
 from src.data_preprocess import process_all_tables, load_raw_data, load_samples_spider_bird
 from src.database import SqliteDatabase
 from src.parsing_sql import (
-    Schema, extract_all, extract_aliases, _format_expression, STRING_TYPE, NUMERIC_TYPE
+    Schema, extract_all, extract_aliases, _format_expression, format_raw_sql, 
+    get_subqueries,
+    STRING_TYPE, NUMERIC_TYPE
 )
 from src.eval_utils import (
     get_complexity, 
@@ -116,11 +119,30 @@ def create_vt_ba(
             bo['gold_complexity'] = get_complexity(output)
 
             # get virtual table
-            parsed_sql = sqlglot.parse_one(sample.final.sql)
-            aliases = extract_aliases(parsed_sql)
-            _, expr = _format_expression(parsed_sql, aliases, schema, 
-                                        remove_alias=False, anonymize_literal=True)
-            bo['vt'] = str(expr)
+            sql = format_raw_sql(sample.final.sql)
+            parsed_query = sqlglot.parse_one(sql)
+            aliases = extract_aliases(parsed_query)
+            check = ['UNION', 'INTERSECT', 'EXCEPT']
+            if any(c in sql.upper() for c in check):
+                # which one?
+                for c in check:
+                    if c in sql.upper():
+                        break
+
+                formated = []
+                subqueries = get_subqueries(parsed_query)
+                for parsed_sql in subqueries:
+                    _, expr = _format_expression(parsed_sql, aliases, schema, lower_case=False, 
+                                            remove_alias=False, anonymize_literal=True)
+                    formated.append(str(expr))
+                vt = f' {c} '.join(formated)
+            else:
+                _, expr = _format_expression(parsed_query, aliases, schema, lower_case=False,
+                                            remove_alias=False, anonymize_literal=True)
+                vt = str(expr)
+
+            pattern = r'ARRAY\([^)]+\)'
+            bo['vt'] = re.sub(pattern, NUMERIC_TYPE, vt)
             
             # get description
             db_schema = get_schema_str(
