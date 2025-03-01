@@ -204,3 +204,31 @@ def format_raw_sql(raw_sql: str) -> str:
     # replace '`' to '"'
     raw_sql = raw_sql.replace('`', '"')
     return raw_sql
+
+# check LLM cache
+# from pprint import pprint
+# def get_content(x: dict):
+#     return json.loads(x['kwargs']['message']['kwargs']['content'])
+# task = 'direct'  
+# # task = 'keyword_extraction'
+# db_id = 'movie_3'
+# prefix = 'x-'
+# file_name = f'{task}_{db_id}'
+# db = SqliteDatabase(f"./cache/{prefix}{file_name}.db")
+
+# # df = db.execute("SELECT * FROM full_llm_cache WHERE ROWID = (SELECT MAX(ROWID) FROM full_llm_cache);")
+# df = db.execute("SELECT ROWID, response FROM full_llm_cache;")
+# df.shape
+# file_name = f'{task}_{db_id}'
+# db = SqliteDatabase(f"./cache/{prefix}{file_name}.db")
+# db.start()
+# c = db.con.cursor()
+# c.execute('BEGIN TRANSACTION')
+
+# # remove the last row record
+# c.execute(f"""
+# DELETE FROM full_llm_cache
+# WHERE ROWID IN ({idxes});
+# """)
+# db.con.commit()
+# db.close()

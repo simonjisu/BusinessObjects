@@ -18,54 +18,54 @@ BIRD / Spider
 
 * direct inference: 
     * dev-no_bos: 
-        * 1_gen_sql: Yes /
-        * 2_evaluate: Yes /
-        * 3_aggregate: Yes /
+        * 1_gen_sql: Yes / Yes
+        * 2_evaluate: Yes / Yes
+        * 3_aggregate: Yes / Yes
     * dev-with_bos:
-        * 0_retrieve: Yes /
-        * 1_gen_sql: Yes / 
-        * 2_evaluate: Yes /
-        * 3_aggregate: Yes /
-        * 4_valid_bo: Yes / 
+        * 0_retrieve: Yes / Yes
+        * 1_gen_sql: Yes / Yes
+        * 2_evaluate: Yes / Yes
+        * 3_aggregate: Yes / Yes
+        * 4_valid_bo: Yes / Yes
     * test-no_bos:
-        * 1_gen_sql: Yes /
-        * 2_evaluate: Yes /
-        * 3_aggregate: Yes /
+        * 1_gen_sql: Yes / Yes
+        * 2_evaluate: Yes / Yes
+        * 3_aggregate: Yes / Yes
     * test-with_bos:
-        * 0_retrieve: Yes /
-        * 1_gen_sql: Yes /
-        * 2_evaluate: Yes /
-        * 3_aggregate: Yes / 
+        * 0_retrieve: Yes / Yes
+        * 1_gen_sql: Yes / Yes
+        * 2_evaluate: Yes / Yes
+        * 3_aggregate: Yes / Yes
 * pipeline inference
     * dev-no_bos:
-        * 1_gen_templates: Yes / 
-        * 2_keyword_extraction: Yes / 
-        * 3_search_value: Yes /
-        * 4_fill_in: Yes /
-        * 5_evaluate: Yes /
-        * 6_aggregate:  Yes /
+        * 1_gen_templates: Yes / Yes
+        * 2_keyword_extraction: Yes / Yes
+        * 3_search_value: Yes / Yes
+        * 4_fill_in: Yes / Yes
+        * 5_evaluate: Yes / Yes
+        * 6_aggregate:  Yes / Yes
     * dev-with_bos:
-        * 0_retrieve: Yes / 
-        * 1_gen_templates: Yes / 
-        * 2_keyword_extraction: Yes /
-        * 3_search_value: Yes /
-        * 4_fill_in: Yes / 
-        * 5_evaluate: Yes / 
+        * 0_retrieve: Yes / Yes
+        * 1_gen_templates: Yes / Yes
+        * 2_keyword_extraction: Yes / Yes
+        * 3_search_value: Yes / Yes 
+        * 4_fill_in: Yes / Yes
+        * 5_evaluate: Yes / Yes 
         * 6_aggregate: Yes / 
         * 7_valid_bo: Yes / 
     * test-no_bos:
-        * 1_gen_templates: Yes / 
-        * 2_keyword_extraction: Yes / 
-        * 3_search_value: Yes / 
-        * 4_fill_in: Yes / 
-        * 5_evaluate: Yes / 
-        * 6_aggregate: Yes / 
+        * 1_gen_templates: Yes / Yes
+        * 2_keyword_extraction: Yes / Yes
+        * 3_search_value: Yes / Yes
+        * 4_fill_in: Yes / Yes
+        * 5_evaluate: Yes / Yes
+        * 6_aggregate: Yes / Yes
     * test-with_bos:
-        * 0_retrieve: Yes / 
-        * 1_gen_templates: Yes / 
-        * 2_keyword_extraction: Yes / 
-        * 3_search_value: Yes / 
-        * 4_fill_in: Yes / 
-        * 5_evaluate: Yes / 
-        * 6_aggregate: Yes / 
+        * 0_retrieve: Yes / Yes 
+        * 1_gen_templates: Yes / Yes 
+        * 2_keyword_extraction: Yes / Yes 
+        * 3_search_value: Yes / Yes 
+        * 4_fill_in: Yes / Yes 
+        * 5_evaluate: Yes / Yes
+        * 6_aggregate: Yes / Yes 
 ```

@@ -43,4 +43,5 @@ dependencies = [
     "pysqlite3-binary>=0.5.4",
     "chromadb>=0.6.3",
     "datasketch>=1.6.5",
+    "statsmodels>=0.14.4",
 ]
