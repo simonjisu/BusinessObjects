@@ -20,6 +20,12 @@ You will need to have OpenAI api-key and Vertexai(Gemini) to run the code. Pleas
 OPENAI_API_KEY = "" 
 ```
 
+### Pretrained Retrieval and Reranking models
+
+You can download the pretrained retrieval and reranking models from [here](https://drive.google.com/file/d/1kxXleTQnfjTbShB-MmUANBgG0DX_DiWq/view?usp=drive_link) and place them in the `models` directory.
+
+Pleae check `train_retrieval_model.py` to train the custom models.
+
 ### TPC-H
 
 You can download pre-processed TPC-H data from [here](https://drive.google.com/file/d/1DdBnQorpF6gkD2n89ySP1wTkXRy0fVeL/view?usp=sharing) to create the TPC-H database. Place it under the `data / tpch` folder. Then you can run `python src/tpch_preprocess.py` to create the TPC-H database.
